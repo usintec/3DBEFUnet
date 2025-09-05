@@ -1,0 +1,13 @@
+torch>=1.12
+torchvision
+torchaudio
+tensorboardX
+tqdm
+matplotlib
+pandas
+numpy
+scipy
+einops
+ml-collections
+nibabel
+wget
