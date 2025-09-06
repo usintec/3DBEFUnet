@@ -92,7 +92,6 @@ class PyramidFeatures3D(nn.Module):
             (depth, height, width), in_chans=1  # MRI → usually single-channel
         )
 
-        # PiDiNet backbone (still 2D → needs true 3D version if you want volumetric convs)
         pidinet = PiDiNet3D(30, config_model(config.pdcs), dil=12, sa=True).eval()
 
         # load PDC weights

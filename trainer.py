@@ -23,22 +23,43 @@ from models.DataLoader import BraTSDataset
 
 
 @torch.no_grad()
-def inference_3d(model, testloader, args, test_save_path=None):
+@torch.no_grad()
+def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     """
     3D inference over whole volumes. Expects batch size == 1 from testloader.
-    testloader must yield dicts with keys: 'image': (1,C,D,H,W), 'label': (1,D,H,W), 'case_name': [str]
+    testloader must yield dicts with keys: 
+      'image': (1,C,D,H,W), 
+      'label': (1,D,H,W), 
+      'case_name': [str]
+
+    Args:
+        model: trained BEFUnet model
+        testloader: dataloader for test set
+        args: arguments with num_classes, etc.
+        test_save_path: optional directory for saving predictions
+        apply_msc: bool, if True → refine segmentation with Mean Shift Clustering (MSC)
     """
     model.eval()
     metric_sum = None  # accumulate per-class metrics (dice, hd95), shape: (C-1, 2)
+
+    # Import MSC module
+    from models.Clustering import MeanShiftClustering
+    msc = MeanShiftClustering(bandwidth=0.5)
 
     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
         image = sampled_batch["image"].cuda(non_blocking=True)   # (1, C, D, H, W)
         label = sampled_batch["label"].cuda(non_blocking=True)   # (1, D, H, W)
         case_name = sampled_batch['case_name'][0]
 
-        # Forward
-        logits = model(image)  # (1, num_classes, D, H, W)
-        pred = torch.argmax(torch.softmax(logits, dim=1), dim=1)  # (1, D, H, W)
+        # Forward pass → model now returns seg_logits, embeddings, dlf_loss
+        seg_logits, embeddings, _ = model(image)
+
+        # Optionally refine with MSC
+        if apply_msc:
+            seg_logits = msc(embeddings, seg_logits)
+
+        # Prediction
+        pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
 
         # Compute per-case metrics with your utility (expects numpy)
         from utils import calculate_metric_percase  # must be 3D-aware
@@ -62,7 +83,7 @@ def inference_3d(model, testloader, args, test_save_path=None):
 
         # Optional save
         if test_save_path is not None:
-            # If you have a 3D NIfTI writer, call it here. Otherwise skip to keep this generic.
+            # Here you could add NIfTI saving (e.g., using nibabel) if required
             pass
 
     # Average over cases
@@ -106,15 +127,15 @@ def plot_result(dice, h, snapshot_path, args):
 
 def trainer_3d(args, model, snapshot_path):
     """
-    3D trainer:
-      - assumes dataset yields ('image': B,C,D,H,W) and 'label': B,D,H,W
-      - model returns logits: B,num_classes,D,H,W
+    3D trainer with CE + Dice + Class-wise Discriminative Loss (DLF).
+    Assumes dataset yields ('image': B,C,D,H,W) and 'label': B,D,H,W.
+    Model returns: seg_logits, embeddings, dlf_loss (placeholder in model).
     """
     date_and_time = datetime.datetime.now()
     os.makedirs(os.path.join(snapshot_path, 'test'), exist_ok=True)
     test_save_path = os.path.join(snapshot_path, 'test')
 
-    # Logs
+    # Logging
     logging.basicConfig(
         filename=os.path.join(snapshot_path, f"{args.model_name}_{date_and_time:%Y%m%d-%H%M%S}_log.txt"),
         level=logging.INFO,
@@ -128,17 +149,10 @@ def trainer_3d(args, model, snapshot_path):
     num_classes = args.num_classes
     batch_size = args.batch_size * args.n_gpu
 
-    # Datasets (replace with your 3D dataset)
-    # Trainer snippet
-    db_train = BraTSDataset(
-        data_dir=args.root_path,
-        transform=None  # or your RandomGenerator3D if you have it
-    )
+    # Dataset loaders
+    db_train = BraTSDataset(data_dir=args.root_path, transform=None)
+    db_test = BraTSDataset(data_dir=args.test_path, transform=None)
 
-    db_test = BraTSDataset(
-        data_dir=args.test_path,
-        transform=None
-    )
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
@@ -163,8 +177,11 @@ def trainer_3d(args, model, snapshot_path):
         model = nn.DataParallel(model)
     model.train()
 
-    ce_loss = CrossEntropyLoss()              # expects B,C,D,H,W vs B,D,H,W
-    dice_loss = DiceLoss(num_classes)         # voxelwise dice, works for 3D volumes
+    # Losses
+    ce_loss = CrossEntropyLoss()
+    dice_loss = DiceLoss(num_classes)
+    from models.losses import ClassWiseDiscriminativeLoss
+    dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
 
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
@@ -183,47 +200,52 @@ def trainer_3d(args, model, snapshot_path):
             image_batch = sampled_batch['image'].cuda(non_blocking=True)   # (B, C, D, H, W)
             label_batch = sampled_batch['label'].cuda(non_blocking=True)   # (B, D, H, W)
 
-            # ⭐ No channel expansion—MRI may already be 1 or multi-channel (e.g., 4 modalities)
-            logits = model(image_batch)  # (B, num_classes, D, H, W)
+            # Forward pass → now returns seg_logits, embeddings, dlf_loss_placeholder
+            seg_logits, embeddings, _ = model(image_batch)
 
-            loss_ce = ce_loss(logits, label_batch.long())
-            loss_dice = dice_loss(logits, label_batch, softmax=True)
-            loss = 0.4 * loss_ce + 0.6 * loss_dice
+            # Losses
+            loss_ce = ce_loss(seg_logits, label_batch.long())
+            loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
+            loss_dlf = dlf_loss_fn(embeddings, label_batch)
+
+            # Weighted combination (tune weights as needed)
+            loss = 0.4 * loss_ce + 0.6 * loss_dice + 0.1 * loss_dlf
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # Poly LR decay
+            # Poly learning rate decay
             lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr_
 
+            # Logging
             iter_num += 1
             writer.add_scalar('info/lr', lr_, iter_num)
             writer.add_scalar('info/total_loss', loss.item(), iter_num)
             writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
             writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
+            writer.add_scalar('info/loss_dlf', loss_dlf.item(), iter_num)
 
-            logging.info('iter %d : loss %.5f | ce %.5f | dice %.5f',
-                         iter_num, loss.item(), loss_ce.item(), loss_dice.item())
+            logging.info('iter %d : total %.5f | ce %.5f | dice %.5f | dlf %.5f',
+                         iter_num, loss.item(), loss_ce.item(), loss_dice.item(), loss_dlf.item())
 
-            # TensorBoard visualization: show middle axial slice
-            try:
-                if iter_num % 10 == 0:
+            # TensorBoard middle slice visualization
+            if iter_num % 10 == 0:
+                try:
                     with torch.no_grad():
                         B, C, D, H, W = image_batch.shape
                         mid = D // 2
-                        # Normalize per-slice for visualization
-                        img_slice = image_batch[0, 0, mid]  # (H, W)
+                        img_slice = image_batch[0, 0, mid]
                         img_slice = (img_slice - img_slice.min()) / (img_slice.max() - img_slice.min() + 1e-6)
-                        writer.add_image('train/Image_mid', img_slice.unsqueeze(0), iter_num)  # (1,H,W)
+                        writer.add_image('train/Image_mid', img_slice.unsqueeze(0), iter_num)
 
-                        pred = torch.argmax(torch.softmax(logits, dim=1), dim=1)  # (B,D,H,W)
+                        pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)
                         writer.add_image('train/Prediction_mid', (pred[0, mid].unsqueeze(0) * 50).float(), iter_num)
                         writer.add_image('train/GroundTruth_mid', (label_batch[0, mid].unsqueeze(0) * 50).float(), iter_num)
-            except Exception as e:
-                logging.warning("TB image logging failed: %s", str(e))
+                except Exception as e:
+                    logging.warning("TB image logging failed: %s", str(e))
 
         # Validation
         if (epoch_num + 1) % args.eval_interval == 0:
@@ -240,7 +262,7 @@ def trainer_3d(args, model, snapshot_path):
             best_performance = max(best_performance, mean_dice)
             model.train()
 
-        # Final epoch handling
+        # Final epoch
         if epoch_num >= max_epoch - 1:
             filename = f'{args.model_name}_epoch_{epoch_num}.pth'
             save_mode_path = os.path.join(snapshot_path, filename)
