@@ -14,13 +14,7 @@ from utils import DiceLoss  # uses reduction over all voxels; works for 3D too
 import matplotlib.pyplot as plt
 import pandas as pd
 import datetime
-from models.DataLoader import BraTSDataset
-# ⚠️ Replace these with your 3D dataset + transforms
-# from datasets.dataset_3d import BrainTumor3DDataset, RandomGenerator3D
-# If you already have a Synapse-like 3D dataset, import that instead:
-# from datasets.dataset_synapse_3d import SynapseDataset3D as BrainTumor3DDataset
-# from datasets.dataset_synapse_3d import RandomGenerator3D
-
+from models.DataLoader import BraTSDataset, get_train_val_loaders
 
 @torch.no_grad()
 @torch.no_grad()
@@ -150,28 +144,28 @@ def trainer_3d(args, model, snapshot_path):
     batch_size = args.batch_size * args.n_gpu
 
     # Dataset loaders
-    db_train = BraTSDataset(data_dir=args.root_path, transform=None)
-    db_test = BraTSDataset(data_dir=args.test_path, transform=None)
+    data_dir = data_dir=args.root_path
+    train_loader, val_loader = get_train_val_loaders(data_dir, batch_size=2)
 
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
-    trainloader = DataLoader(
-        db_train,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        worker_init_fn=worker_init_fn
-    )
+    # trainloader = DataLoader(
+    #     db_train,
+    #     batch_size=batch_size,
+    #     shuffle=True,
+    #     num_workers=args.num_workers,
+    #     pin_memory=True,
+    #     worker_init_fn=worker_init_fn
+    # )
 
-    testloader = DataLoader(
-        db_test,
-        batch_size=1,
-        shuffle=False,
-        num_workers=1,
-        pin_memory=True
-    )
+    # testloader = DataLoader(
+    #     db_test,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     num_workers=1,
+    #     pin_memory=True
+    # )
 
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
@@ -180,7 +174,7 @@ def trainer_3d(args, model, snapshot_path):
     # Losses
     ce_loss = CrossEntropyLoss()
     dice_loss = DiceLoss(num_classes)
-    from models.losses import ClassWiseDiscriminativeLoss
+    from models.Losses import ClassWiseDiscriminativeLoss
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
 
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
@@ -188,15 +182,15 @@ def trainer_3d(args, model, snapshot_path):
 
     iter_num = 0
     max_epoch = args.max_epochs
-    max_iterations = args.max_epochs * len(trainloader)
-    logging.info("%d iterations per epoch. %d max iterations", len(trainloader), max_iterations)
+    max_iterations = args.max_epochs * len(train_loader)
+    logging.info("%d iterations per epoch. %d max iterations", len(train_loader), max_iterations)
 
     best_performance = 0.0
     dice_hist, hd95_hist = [], []
     iterator = tqdm(range(max_epoch), ncols=70)
 
     for epoch_num in iterator:
-        for i_batch, sampled_batch in enumerate(trainloader):
+        for i_batch, sampled_batch in enumerate(train_loader):
             image_batch = sampled_batch['image'].cuda(non_blocking=True)   # (B, C, D, H, W)
             label_batch = sampled_batch['label'].cuda(non_blocking=True)   # (B, D, H, W)
 
@@ -256,7 +250,7 @@ def trainer_3d(args, model, snapshot_path):
 
             logging.info("*" * 20)
             logging.info("Running Inference after epoch %d", epoch_num)
-            mean_dice, mean_hd95 = inference_3d(model, testloader, args, test_save_path=test_save_path)
+            mean_dice, mean_hd95 = inference_3d(model, val_loader, args, test_save_path=test_save_path)
             dice_hist.append(mean_dice)
             hd95_hist.append(mean_hd95)
             best_performance = max(best_performance, mean_dice)
@@ -272,7 +266,7 @@ def trainer_3d(args, model, snapshot_path):
             if not ((epoch_num + 1) % args.eval_interval == 0):
                 logging.info("*" * 20)
                 logging.info("Running Inference after epoch %d (Last Epoch)", epoch_num)
-                mean_dice, mean_hd95 = inference_3d(model, testloader, args, test_save_path=test_save_path)
+                mean_dice, mean_hd95 = inference_3d(model, val_loader, args, test_save_path=test_save_path)
                 dice_hist.append(mean_dice)
                 hd95_hist.append(mean_hd95)
                 best_performance = max(best_performance, mean_dice)

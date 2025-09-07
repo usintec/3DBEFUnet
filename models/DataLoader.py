@@ -1,12 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import nibabel as nib
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 import random
 import scipy.ndimage as ndimage
-import os, glob
+import os, glob, nibabel as nib
+from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 
 # =========================
 # 4. Visualize MRI slices
@@ -98,21 +98,21 @@ def augment(modalities, seg):
     return modalities, seg
 
 # =========================
-# 5. Data Loader Preparation (for BEFUnet)
+# BraTS Dataset Class
 # =========================
 class BraTSDataset(Dataset):
-    def __init__(self, data_dir, transform=True, target_shape=(128,128,128)):
+    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128)):
         """
         Args:
-            data_dir (str): Path to BraTS2020 training folder
+            case_dirs (list): List of paths to case folders
             transform (bool): Whether to apply augmentation
             target_shape (tuple): Shape to resize volumes
         """
-        self.case_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
+        self.case_dirs = case_dirs
         self.transform = transform
         self.target_shape = target_shape
 
-        print(f"Found {len(self.case_dirs)} cases in {data_dir}")
+        print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
 
     def __len__(self):
         return len(self.case_dirs)
@@ -122,7 +122,7 @@ class BraTSDataset(Dataset):
         files = sorted(glob.glob(os.path.join(case_dir, "*.nii*")))
         assert len(files) == 5, f"Expected 5 files in {case_dir}, found {len(files)}"
 
-        # Load modalities (T1, T1CE, T2, FLAIR)
+        # Load 4 MRI modalities (T1, T1CE, T2, FLAIR)
         modalities = []
         for f in files:
             if "seg" not in f:
@@ -132,17 +132,38 @@ class BraTSDataset(Dataset):
                 modalities.append(img)
         modalities = np.stack(modalities, axis=0)  # (4, H, W, D)
 
-        # Load segmentation
+        # Load segmentation map
         seg_file = [f for f in files if "seg" in f][0]
         seg = nib.load(seg_file).get_fdata()
         seg = resize_volume(seg, self.target_shape)
 
-        # Augmentation
+        # Augmentation (only if training)
         if self.transform:
             modalities, seg = augment(modalities, seg)
 
-        # Convert to torch tensor
+        # Convert to tensors
         modalities = torch.tensor(modalities, dtype=torch.float32)  # (4,H,W,D)
         seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
 
         return modalities, seg
+
+
+# =========================
+# Dataset Split
+# =========================
+def get_train_val_loaders(data_dir, batch_size=2, target_shape=(128,128,128)):
+    all_cases = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
+    print(f"Found total {len(all_cases)} cases.")
+
+    # 80/20 split
+    train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
+
+    # Create datasets
+    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape)   # with augmentation
+    val_dataset   = BraTSDataset(val_cases, transform=False, target_shape=target_shape)   # no augmentation
+
+    # Create loaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader   = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    return train_loader, val_loader

@@ -13,9 +13,9 @@ from trainer import trainer_3d
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
-                    default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
+                    default='./content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
 parser.add_argument('--test_path', type=str,
-                    default='./data/BraTS2020/val', help='root dir for test data')
+                    default='./content/brats2020/BraTS2020_ValidationData/MICCAI_BraTS2020_ValidationData', help='root dir for test data')
 parser.add_argument('--dataset', type=str,
                     default='BraTS2020', help='experiment name')
 parser.add_argument('--list_dir', type=str,

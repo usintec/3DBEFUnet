@@ -14,8 +14,6 @@ def get_BEFUnet_configs():
     cfg.patch_size = [2, 4, 4]        # patch depth, height, width
     cfg.num_classes = 4               # BraTS: background + 3 tumor classes
 
-    # ⚠️ Pretrained Swin 2D weights are not compatible with 3D
-    # You can later adapt or inflate weights if you need
     cfg.swin_pretrained_path = None
 
     # CNN (PiDiNet3D) Configs
