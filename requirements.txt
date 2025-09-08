@@ -5,9 +5,12 @@ tensorboardX
 tqdm
 matplotlib
 pandas
-numpy
+numpy<2
 scipy
 einops
 ml-collections
 nibabel
 wget
+timm
+medpy
+scikit-learn

@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 from einops.layers.torch import Rearrange
 
-from models.Encoder import All2Cross
-from models.Decoder import ConvUpsample, SegmentationHead
+from models.Encoder import All2Cross3D
+from models.Decoder import ConvUpsample3D, SegmentationHead3D
 
 
 class BEFUnet3D(nn.Module):
-    def __init__(self, config, img_size=128, in_chans=1, n_classes=4):
+    def __init__(self, config, img_size=(128,128,128), in_chans=1, n_classes=4):
         """
         BEFUnet adapted for 3D MRI brain tumor segmentation.
         Args:
@@ -22,14 +22,14 @@ class BEFUnet3D(nn.Module):
         self.n_classes = n_classes
 
         # 3D Encoder
-        self.All2Cross = All2Cross(config=config, img_size=img_size, in_chans=in_chans)
+        self.All2Cross = All2Cross3D(config=config, img_size=img_size, in_chans=in_chans)
 
         # 3D Decoder (conv-upsample)
-        self.ConvUp_s = ConvUpsample(in_chans=768, out_chans=[128, 128, 128], upsample=True, is_3d=True)  # 1
-        self.ConvUp_l = ConvUpsample(in_chans=96, upsample=False, is_3d=True)  # 0
+        self.ConvUp_s = ConvUpsample3D(in_chans=768, out_chans=[128, 128, 128], upsample=True, is_3d=True)  # 1
+        self.ConvUp_l = ConvUpsample3D(in_chans=96, upsample=False, is_3d=True)  # 0
 
         # Segmentation head (3D)
-        self.segmentation_head = SegmentationHead(
+        self.segmentation_head = SegmentationHead3D(
             in_channels=16,
             out_channels=n_classes,
             kernel_size=3,
@@ -63,9 +63,9 @@ class BEFUnet3D(nn.Module):
             # Flatten back to 3D volume tokens
             embed = Rearrange(
                 'b (d h w) c -> b c d h w',
-                d=(self.img_size // self.patch_size[i]),
-                h=(self.img_size // self.patch_size[i]),
-                w=(self.img_size // self.patch_size[i])
+                d=(self.img_size[0] // self.patch_size[i]),
+                h=(self.img_size[1] // self.patch_size[i]),
+                w=(self.img_size[2] // self.patch_size[i])
             )(embed)
 
             # Pass through conv-up

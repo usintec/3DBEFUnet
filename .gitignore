@@ -1,3 +1,12 @@
 content
 results
 lists
+venv2
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore cache inside subfolders
+*/__pycache__/
