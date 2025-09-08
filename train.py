@@ -74,18 +74,18 @@ if __name__ == "__main__":
     if args.batch_size != 24 and args.batch_size % 6 == 0:
         args.base_lr *= args.batch_size / 24
 
-    # model = BEFUnet3D(
-    #     config=CONFIGS['BEFUnet3D'],
-    #     img_size=(args.img_size, args.img_size, args.img_size),
-    #     in_chans=4,  # BraTS has 4 modalities
-    #     n_classes=args.num_classes
-    # ).cuda()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = BEFUnet3D(
         config=CONFIGS['BEFUnet3D'],
         img_size=(args.img_size, args.img_size, args.img_size),
         in_chans=4,  # BraTS has 4 modalities
         n_classes=args.num_classes
-    ).to(device)
+    ).cuda()
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model = BEFUnet3D(
+    #     config=CONFIGS['BEFUnet3D'],
+    #     img_size=(args.img_size, args.img_size, args.img_size),
+    #     in_chans=4,  # BraTS has 4 modalities
+    #     n_classes=args.num_classes
+    # ).to(device)
 
     trainer_3d(args, model, args.output_dir)
