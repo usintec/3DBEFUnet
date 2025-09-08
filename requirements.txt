@@ -5,7 +5,8 @@ tensorboardX
 tqdm
 matplotlib
 pandas
-numpy<2
+numpy<2; platform_system == "Windows"
+numpy>=2; platform_system != "Windows"
 scipy
 einops
 ml-collections
