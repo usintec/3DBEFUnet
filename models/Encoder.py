@@ -223,7 +223,7 @@ class PyramidFeatures3D(nn.Module):
 
 # 3D MSF Module
 class All2Cross3D(nn.Module):
-    def __init__(self, config, img_size=(128,128,128), in_chans=1, embed_dim=(96, 768), norm_layer=nn.LayerNorm):
+    def __init__(self, config, img_size=(128,128,128), in_chans=4, embed_dim=(96, 768), norm_layer=nn.LayerNorm):
         """
         Args:
             config: model configuration
