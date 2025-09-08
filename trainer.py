@@ -150,23 +150,6 @@ def trainer_3d(args, model, snapshot_path):
     def worker_init_fn(worker_id):
         random.seed(args.seed + worker_id)
 
-    # trainloader = DataLoader(
-    #     db_train,
-    #     batch_size=batch_size,
-    #     shuffle=True,
-    #     num_workers=args.num_workers,
-    #     pin_memory=True,
-    #     worker_init_fn=worker_init_fn
-    # )
-
-    # testloader = DataLoader(
-    #     db_test,
-    #     batch_size=1,
-    #     shuffle=False,
-    #     num_workers=1,
-    #     pin_memory=True
-    # )
-
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
     model.train()

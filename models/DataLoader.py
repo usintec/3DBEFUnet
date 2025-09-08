@@ -100,52 +100,39 @@ def augment(modalities, seg):
 # =========================
 # BraTS Dataset Class
 # =========================
-class BraTSDataset(Dataset):
-    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128)):
-        """
-        Args:
-            case_dirs (list): List of paths to case folders
-            transform (bool): Whether to apply augmentation
-            target_shape (tuple): Shape to resize volumes
-        """
-        self.case_dirs = case_dirs
-        self.transform = transform
-        self.target_shape = target_shape
+def __getitem__(self, idx):
+    case_dir = self.case_dirs[idx]
+    files = sorted(glob.glob(os.path.join(case_dir, "*.nii*")))
+    assert len(files) == 5, f"Expected 5 files in {case_dir}, found {len(files)}"
 
-        print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
+    # Load 4 MRI modalities (T1, T1CE, T2, FLAIR)
+    modalities = []
+    for f in files:
+        if "seg" not in f:
+            img = nib.load(f).get_fdata()
+            img = normalize(img)
+            img = resize_volume(img, self.target_shape)
+            modalities.append(img)
+    modalities = np.stack(modalities, axis=0)  # (4, H, W, D)
 
-    def __len__(self):
-        return len(self.case_dirs)
+    # Load segmentation map
+    seg_file = [f for f in files if "seg" in f][0]
+    seg = nib.load(seg_file).get_fdata()
+    seg = resize_volume(seg, self.target_shape)
 
-    def __getitem__(self, idx):
-        case_dir = self.case_dirs[idx]
-        files = sorted(glob.glob(os.path.join(case_dir, "*.nii*")))
-        assert len(files) == 5, f"Expected 5 files in {case_dir}, found {len(files)}"
+    # Augmentation (only if training)
+    if self.transform:
+        modalities, seg = augment(modalities, seg)
 
-        # Load 4 MRI modalities (T1, T1CE, T2, FLAIR)
-        modalities = []
-        for f in files:
-            if "seg" not in f:
-                img = nib.load(f).get_fdata()
-                img = normalize(img)
-                img = resize_volume(img, self.target_shape)
-                modalities.append(img)
-        modalities = np.stack(modalities, axis=0)  # (4, H, W, D)
+    # Convert to tensors
+    modalities = torch.tensor(modalities, dtype=torch.float32)  # (4,H,W,D)
+    seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
 
-        # Load segmentation map
-        seg_file = [f for f in files if "seg" in f][0]
-        seg = nib.load(seg_file).get_fdata()
-        seg = resize_volume(seg, self.target_shape)
-
-        # Augmentation (only if training)
-        if self.transform:
-            modalities, seg = augment(modalities, seg)
-
-        # Convert to tensors
-        modalities = torch.tensor(modalities, dtype=torch.float32)  # (4,H,W,D)
-        seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
-
-        return modalities, seg
+    return {
+        "image": modalities,
+        "label": seg,
+        "case_name": os.path.basename(case_dir)
+    }
 
 
 # =========================
