@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from timm.models.vision_transformer import _cfg, Mlp, Block
+import torch.nn.functional as F
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -25,55 +26,120 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
     
+# def window_partition_3d(x, window_size):
+#     """
+#     Partition 3D feature maps into windows.
+#     Args:
+#         x: (B, H, W, D, C)
+#         window_size: int or tuple of 3 ints
+#     """
+#     B, H, W, D, C = x.shape
+
+#     # Ensure window_size is a tuple of 3 ints
+#     if isinstance(window_size, int):
+#         window_size = (window_size, window_size, window_size)
+
+#     Wh, Ww, Wd = window_size
+
+#     x = x.view(B,
+#                H // Wh, Wh,
+#                W // Ww, Ww,
+#                D // Wd, Wd,
+#                C)
+
+#     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, Wh, Ww, Wd, C)
+#     return windows
+
+
+# def window_reverse_3d(windows, window_size, H, W, D):
+#     """
+#     Args:
+#         windows: (num_windows*B, ws, ws, ws, C)
+#         window_size (int): Window size (applied to H, W, D)
+#         H, W, D (int): Dimensions of the volume
+#     Returns:
+#         x: (B, H, W, D, C)
+#     """
+#     B = int(windows.shape[0] / (H * W * D / window_size**3))
+
+#     x = windows.view(B,
+#                      H // window_size,
+#                      W // window_size,
+#                      D // window_size,
+#                      window_size,
+#                      window_size,
+#                      window_size,
+#                      -1)
+
+#     # Rearrange dimensions back
+#     x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous() \
+#          .view(B, H, W, D, -1)
+
+#     return x
+
 def window_partition_3d(x, window_size):
     """
+    Partition 3D feature maps into non-overlapping windows.
     Args:
-        x: (B, H, W, D, C)   # 3D input
-        window_size (int): window size (applied to H, W, D)
-    Returns:
-        windows: (num_windows*B, window_size, window_size, window_size, C)
+        x: (B, H, W, D, C)
+        window_size: int or tuple of 3 ints
     """
     B, H, W, D, C = x.shape
-    
-    # Reshape into 3D windows
-    x = x.view(
-        B,
-        H // window_size, window_size,   # split height
-        W // window_size, window_size,   # split width
-        D // window_size, window_size,   # split depth
-        C
-    )
-    
-    # Rearrange: (B, num_H, num_W, num_D, win_H, win_W, win_D, C)
-    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous() \
-               .view(-1, window_size, window_size, window_size, C)
-    
+
+    # Ensure tuple
+    if isinstance(window_size, int):
+        window_size = (window_size, window_size, window_size)
+    Wh, Ww, Wd = window_size
+
+    # Save original sizes (for cropping later)
+    original_size = (H, W, D)
+
+    # Pad so divisible by window_size
+    pad_h = (Wh - H % Wh) % Wh
+    pad_w = (Ww - W % Ww) % Ww
+    pad_d = (Wd - D % Wd) % Wd
+
+    if pad_h > 0 or pad_w > 0 or pad_d > 0:
+        x = F.pad(x, (0, 0, 0, pad_d, 0, pad_w, 0, pad_h))
+        _, H, W, D, _ = x.shape
+
+    # Reshape into windows
+    x = x.view(B,
+               H // Wh, Wh,
+               W // Ww, Ww,
+               D // Wd, Wd,
+               C)
+
+    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, Wh, Ww, Wd, C)
     return windows
 
-def window_reverse_3d(windows, window_size, H, W, D):
+
+def window_reverse_3d(windows, original_size, window_size, B):
     """
+    Reverse windows back to original 3D feature maps.
     Args:
-        windows: (num_windows*B, ws, ws, ws, C)
-        window_size (int): Window size (applied to H, W, D)
-        H, W, D (int): Dimensions of the volume
-    Returns:
-        x: (B, H, W, D, C)
+        windows: (num_windows*B, Wh, Ww, Wd, C)
+        original_size: tuple (H, W, D) before padding
+        window_size: tuple (Wh, Ww, Wd)
+        B: batch size
     """
-    B = int(windows.shape[0] / (H * W * D / window_size**3))
+    H, W, D = original_size
+    Wh, Ww, Wd = window_size
+    C = windows.shape[-1]
+
+    # Calculate padded sizes
+    Hp = (H + Wh - 1) // Wh * Wh
+    Wp = (W + Ww - 1) // Ww * Ww
+    Dp = (D + Wd - 1) // Wd * Wd
 
     x = windows.view(B,
-                     H // window_size,
-                     W // window_size,
-                     D // window_size,
-                     window_size,
-                     window_size,
-                     window_size,
-                     -1)
+                     Hp // Wh, Wp // Ww, Dp // Wd,
+                     Wh, Ww, Wd, C)
 
-    # Rearrange dimensions back
-    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous() \
-         .view(B, H, W, D, -1)
+    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, Hp, Wp, Dp, C)
 
+    # Crop back to original size
+    x = x[:, :H, :W, :D, :].contiguous()
     return x
 
 '''

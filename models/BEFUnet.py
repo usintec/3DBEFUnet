@@ -25,15 +25,14 @@ class BEFUnet3D(nn.Module):
         self.All2Cross = All2Cross3D(config=config, img_size=img_size, in_chans=in_chans)
 
         # 3D Decoder (conv-upsample)
-        self.ConvUp_s = ConvUpsample3D(in_chans=768, out_chans=[128, 128, 128], upsample=True, is_3d=True)  # 1
-        self.ConvUp_l = ConvUpsample3D(in_chans=96, upsample=False, is_3d=True)  # 0
+        self.ConvUp_s = ConvUpsample3D(in_chans=768, out_chans=[128, 128, 128], upsample=True)  # 1
+        self.ConvUp_l = ConvUpsample3D(in_chans=96, upsample=False)  # 0
 
         # Segmentation head (3D)
         self.segmentation_head = SegmentationHead3D(
             in_channels=16,
             out_channels=n_classes,
-            kernel_size=3,
-            is_3d=True
+            kernel_size=3
         )
 
         # 3D prediction conv

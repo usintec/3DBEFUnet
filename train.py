@@ -13,9 +13,10 @@ from trainer import trainer_3d
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str,
-                    default='./content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
+                    # default='C:/Users/Olatayo/Documents/Machine-Learning/3DBEFUnet Model/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
+                    default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
 parser.add_argument('--test_path', type=str,
-                    default='./content/brats2020/BraTS2020_ValidationData/MICCAI_BraTS2020_ValidationData', help='root dir for test data')
+                    default='/content/brats2020/BraTS2020_ValidationData/MICCAI_BraTS2020_ValidationData', help='root dir for test data')
 parser.add_argument('--dataset', type=str,
                     default='BraTS2020', help='experiment name')
 parser.add_argument('--list_dir', type=str,
@@ -73,11 +74,18 @@ if __name__ == "__main__":
     if args.batch_size != 24 and args.batch_size % 6 == 0:
         args.base_lr *= args.batch_size / 24
 
+    # model = BEFUnet3D(
+    #     config=CONFIGS['BEFUnet3D'],
+    #     img_size=(args.img_size, args.img_size, args.img_size),
+    #     in_chans=4,  # BraTS has 4 modalities
+    #     n_classes=args.num_classes
+    # ).cuda()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = BEFUnet3D(
         config=CONFIGS['BEFUnet3D'],
-        img_size=args.img_size,
+        img_size=(args.img_size, args.img_size, args.img_size),
         in_chans=4,  # BraTS has 4 modalities
         n_classes=args.num_classes
-    ).cuda()
+    ).to(device)
 
     trainer_3d(args, model, args.output_dir)

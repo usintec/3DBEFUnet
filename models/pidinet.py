@@ -49,10 +49,10 @@ class CDCM3D(nn.Module):
             •	Dilation of 11 in 3D = very large receptive field, may blow up memory on full 3D MRI volumes (240×240×155 in BraTS).
             •	You might want smaller values (2, 3, 5, 7) instead of (5,7,9,11) for stability.
         '''
-        self.conv2_1 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=5, padding=5, bias=False)
-        self.conv2_2 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=7, padding=7, bias=False)
-        self.conv2_3 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=9, padding=9, bias=False)
-        self.conv2_4 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=11, padding=11, bias=False)
+        self.conv2_1 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=2, padding=5, bias=False)
+        self.conv2_2 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=3, padding=7, bias=False)
+        self.conv2_3 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=5, padding=9, bias=False)
+        self.conv2_4 = nn.Conv3d(out_channels, out_channels, kernel_size=3, dilation=7, padding=11, bias=False)
 
         nn.init.constant_(self.conv1.bias, 0)
 
