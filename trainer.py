@@ -180,87 +180,59 @@ def trainer_3d(args, model, snapshot_path):
             # ✅ Only move labels to GPU if not None
             if label_batch is not None:
                 label_batch = label_batch.cuda(non_blocking=True)
-                
-            # Forward pass → now returns seg_logits, embeddings, dlf_loss_placeholder
+
+            # Forward pass
             seg_logits, embeddings, _ = model(image_batch)
 
-            # Losses
-            loss_ce = ce_loss(seg_logits, label_batch.long())
-            loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
-            loss_dlf = dlf_loss_fn(embeddings, label_batch)
+            if label_batch is not None:
+                # ✅ Compute losses only if labels exist
+                loss_ce = ce_loss(seg_logits, label_batch.long())
+                loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
+                loss_dlf = dlf_loss_fn(embeddings, label_batch)
 
-            # Weighted combination (tune weights as needed)
-            loss = 0.4 * loss_ce + 0.6 * loss_dice + 0.1 * loss_dlf
+                # Weighted sum
+                loss = 0.4 * loss_ce + 0.6 * loss_dice + 0.1 * loss_dlf
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            # Poly learning rate decay
-            lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr_
+                # Poly LR decay
+                lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr_
 
-            # Logging
-            iter_num += 1
-            writer.add_scalar('info/lr', lr_, iter_num)
-            writer.add_scalar('info/total_loss', loss.item(), iter_num)
-            writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
-            writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
-            writer.add_scalar('info/loss_dlf', loss_dlf.item(), iter_num)
+                # Logging
+                iter_num += 1
+                writer.add_scalar('info/lr', lr_, iter_num)
+                writer.add_scalar('info/total_loss', loss.item(), iter_num)
+                writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
+                writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
+                writer.add_scalar('info/loss_dlf', loss_dlf.item(), iter_num)
 
-            logging.info('iter %d : total %.5f | ce %.5f | dice %.5f | dlf %.5f',
-                         iter_num, loss.item(), loss_ce.item(), loss_dice.item(), loss_dlf.item())
+                logging.info(
+                    'iter %d : total %.5f | ce %.5f | dice %.5f | dlf %.5f',
+                    iter_num, loss.item(), loss_ce.item(), loss_dice.item(), loss_dlf.item()
+                )
 
-            # TensorBoard middle slice visualization
-            if iter_num % 10 == 0:
-                try:
-                    with torch.no_grad():
-                        B, C, D, H, W = image_batch.shape
-                        mid = D // 2
-                        img_slice = image_batch[0, 0, mid]
-                        img_slice = (img_slice - img_slice.min()) / (img_slice.max() - img_slice.min() + 1e-6)
-                        writer.add_image('train/Image_mid', img_slice.unsqueeze(0), iter_num)
+                # ✅ Only log GT mid-slice if labels exist
+                if iter_num % 10 == 0:
+                    try:
+                        with torch.no_grad():
+                            B, C, D, H, W = image_batch.shape
+                            mid = D // 2
+                            img_slice = image_batch[0, 0, mid]
+                            img_slice = (img_slice - img_slice.min()) / (img_slice.max() - img_slice.min() + 1e-6)
+                            writer.add_image('train/Image_mid', img_slice.unsqueeze(0), iter_num)
 
-                        pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)
-                        writer.add_image('train/Prediction_mid', (pred[0, mid].unsqueeze(0) * 50).float(), iter_num)
-                        writer.add_image('train/GroundTruth_mid', (label_batch[0, mid].unsqueeze(0) * 50).float(), iter_num)
-                except Exception as e:
-                    logging.warning("TB image logging failed: %s", str(e))
+                            pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)
+                            writer.add_image('train/Prediction_mid', (pred[0, mid].unsqueeze(0) * 50).float(), iter_num)
 
-        # Validation
-        if (epoch_num + 1) % args.eval_interval == 0:
-            filename = f'{args.model_name}_epoch_{epoch_num}.pth'
-            save_mode_path = os.path.join(snapshot_path, filename)
-            torch.save(model.state_dict(), save_mode_path)
-            logging.info("Saved model to %s", save_mode_path)
+                            if label_batch is not None:
+                                writer.add_image('train/GroundTruth_mid', (label_batch[0, mid].unsqueeze(0) * 50).float(), iter_num)
+                    except Exception as e:
+                        logging.warning("TB image logging failed: %s", str(e))
 
-            logging.info("*" * 20)
-            logging.info("Running Inference after epoch %d", epoch_num)
-            mean_dice, mean_hd95 = inference_3d(model, val_loader, args, test_save_path=test_save_path)
-            dice_hist.append(mean_dice)
-            hd95_hist.append(mean_hd95)
-            best_performance = max(best_performance, mean_dice)
-            model.train()
-
-        # Final epoch
-        if epoch_num >= max_epoch - 1:
-            filename = f'{args.model_name}_epoch_{epoch_num}.pth'
-            save_mode_path = os.path.join(snapshot_path, filename)
-            torch.save(model.state_dict(), save_mode_path)
-            logging.info("Saved model to %s", save_mode_path)
-
-            if not ((epoch_num + 1) % args.eval_interval == 0):
-                logging.info("*" * 20)
-                logging.info("Running Inference after epoch %d (Last Epoch)", epoch_num)
-                mean_dice, mean_hd95 = inference_3d(model, val_loader, args, test_save_path=test_save_path)
-                dice_hist.append(mean_dice)
-                hd95_hist.append(mean_hd95)
-                best_performance = max(best_performance, mean_dice)
-                model.train()
-
-            iterator.close()
-            break
 
     plot_result(dice_hist, hd95_hist, snapshot_path, args)
     writer.close()
