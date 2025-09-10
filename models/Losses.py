@@ -42,6 +42,14 @@ class ClassWiseDiscriminativeLoss(nn.Module):
             embed = embeddings[b]      # [D, H, W, C]
             labels = class_labels[b]   # [D, H, W]
 
+            # 🔥 Fix: downsample labels if resolution mismatches
+            if labels.shape != embed.shape[:3]:
+                labels = torch.nn.functional.interpolate(
+                    labels.unsqueeze(0).unsqueeze(0).float(),
+                    size=embed.shape[:3],  # match embedding [D,H,W]
+                    mode='nearest'
+                ).squeeze().long()
+
             unique_classes = labels.unique()
             unique_classes = unique_classes[unique_classes != self.ignore_index]
             if len(unique_classes) == 0:
@@ -82,7 +90,7 @@ class ClassWiseDiscriminativeLoss(nn.Module):
             reg_loss = torch.mean(torch.norm(torch.stack(class_means), dim=1))
 
             total_loss += (self.param_var * var_loss +
-                           self.param_dist * dist_loss +
-                           self.param_reg * reg_loss)
+                        self.param_dist * dist_loss +
+                        self.param_reg * reg_loss)
 
         return total_loss / B
