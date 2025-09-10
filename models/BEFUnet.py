@@ -44,22 +44,13 @@ class BEFUnet3D(nn.Module):
             nn.ReLU(inplace=True),
             nn.Upsample(scale_factor=4, mode='trilinear', align_corners=False)
         )
-
     def forward(self, x):
-        """
-        Forward pass
-        Args:
-            x: Tensor [B, C, D, H, W]
-        Returns:
-            Segmentation map [B, n_classes, D, H, W]
-        """
         xs = self.All2Cross(x)   # list of embeddings [small, large]
 
         embeddings = [x[:, 1:] for x in xs]  # remove cls token
         reshaped_embed = []
 
         for i, embed in enumerate(embeddings):
-            # Flatten back to 3D volume tokens
             embed = Rearrange(
                 'b (d h w) c -> b c d h w',
                 d=(self.img_size[0] // self.patch_size[i]),
@@ -67,7 +58,6 @@ class BEFUnet3D(nn.Module):
                 w=(self.img_size[2] // self.patch_size[i])
             )(embed)
 
-            # Pass through conv-up
             embed = self.ConvUp_l(embed) if i == 0 else self.ConvUp_s(embed)
             reshaped_embed.append(embed)
 
@@ -78,4 +68,40 @@ class BEFUnet3D(nn.Module):
         # Final segmentation head
         out = self.segmentation_head(C)
 
-        return out
+        # return 3 items: seg_logits, embeddings, aux (set aux=None if unused)
+        return out, reshaped_embed, None
+
+    # def forward(self, x):
+    #     """
+    #     Forward pass
+    #     Args:
+    #         x: Tensor [B, C, D, H, W]
+    #     Returns:
+    #         Segmentation map [B, n_classes, D, H, W]
+    #     """
+    #     xs = self.All2Cross(x)   # list of embeddings [small, large]
+
+    #     embeddings = [x[:, 1:] for x in xs]  # remove cls token
+    #     reshaped_embed = []
+
+    #     for i, embed in enumerate(embeddings):
+    #         # Flatten back to 3D volume tokens
+    #         embed = Rearrange(
+    #             'b (d h w) c -> b c d h w',
+    #             d=(self.img_size[0] // self.patch_size[i]),
+    #             h=(self.img_size[1] // self.patch_size[i]),
+    #             w=(self.img_size[2] // self.patch_size[i])
+    #         )(embed)
+
+    #         # Pass through conv-up
+    #         embed = self.ConvUp_l(embed) if i == 0 else self.ConvUp_s(embed)
+    #         reshaped_embed.append(embed)
+
+    #     # Fuse multi-scale features
+    #     C = reshaped_embed[0] + reshaped_embed[1]
+    #     C = self.conv_pred(C)
+
+    #     # Final segmentation head
+    #     out = self.segmentation_head(C)
+
+    #     return out
