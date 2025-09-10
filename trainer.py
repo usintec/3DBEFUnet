@@ -175,8 +175,12 @@ def trainer_3d(args, model, snapshot_path):
     for epoch_num in iterator:
         for i_batch, sampled_batch in enumerate(train_loader):
             image_batch = sampled_batch['image'].cuda(non_blocking=True)   # (B, C, D, H, W)
-            label_batch = sampled_batch['label'].cuda(non_blocking=True)   # (B, D, H, W)
+            label_batch = sampled_batch['label']
 
+            # ✅ Only move labels to GPU if not None
+            if label_batch is not None:
+                label_batch = label_batch.cuda(non_blocking=True)
+                
             # Forward pass → now returns seg_logits, embeddings, dlf_loss_placeholder
             seg_logits, embeddings, _ = model(image_batch)
 
