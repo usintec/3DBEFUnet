@@ -25,57 +25,6 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
-    
-# def window_partition_3d(x, window_size):
-#     """
-#     Partition 3D feature maps into windows.
-#     Args:
-#         x: (B, H, W, D, C)
-#         window_size: int or tuple of 3 ints
-#     """
-#     B, H, W, D, C = x.shape
-
-#     # Ensure window_size is a tuple of 3 ints
-#     if isinstance(window_size, int):
-#         window_size = (window_size, window_size, window_size)
-
-#     Wh, Ww, Wd = window_size
-
-#     x = x.view(B,
-#                H // Wh, Wh,
-#                W // Ww, Ww,
-#                D // Wd, Wd,
-#                C)
-
-#     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, Wh, Ww, Wd, C)
-#     return windows
-
-
-# def window_reverse_3d(windows, window_size, H, W, D):
-#     """
-#     Args:
-#         windows: (num_windows*B, ws, ws, ws, C)
-#         window_size (int): Window size (applied to H, W, D)
-#         H, W, D (int): Dimensions of the volume
-#     Returns:
-#         x: (B, H, W, D, C)
-#     """
-#     B = int(windows.shape[0] / (H * W * D / window_size**3))
-
-#     x = windows.view(B,
-#                      H // window_size,
-#                      W // window_size,
-#                      D // window_size,
-#                      window_size,
-#                      window_size,
-#                      window_size,
-#                      -1)
-
-#     # Rearrange dimensions back
-#     x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous() \
-#          .view(B, H, W, D, -1)
-
-#     return x
 
 def window_partition_3d(x, window_size):
     """
@@ -83,16 +32,15 @@ def window_partition_3d(x, window_size):
     Args:
         x: (B, H, W, D, C)
         window_size: int or tuple of 3 ints
+    Returns:
+        windows: (num_windows*B, Wh, Ww, Wd, C)
+        B, H, W, D: original sizes (before partition)
     """
     B, H, W, D, C = x.shape
 
-    # Ensure tuple
     if isinstance(window_size, int):
         window_size = (window_size, window_size, window_size)
     Wh, Ww, Wd = window_size
-
-    # Save original sizes (for cropping later)
-    original_size = (H, W, D)
 
     # Pad so divisible by window_size
     pad_h = (Wh - H % Wh) % Wh
@@ -111,34 +59,27 @@ def window_partition_3d(x, window_size):
                C)
 
     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, Wh, Ww, Wd, C)
-    return windows
+    return windows, B, H, W, D
 
 
-def window_reverse_3d(windows, window_size, H, W, D):
+def window_reverse_3d(windows, window_size, B, H, W, D):
     """
     Reverse windows back to original 3D feature maps.
     Args:
         windows: (num_windows*B, Wh, Ww, Wd, C)
         window_size: tuple (Wh, Ww, Wd)
-        H, W, D: original spatial sizes
+        B, H, W, D: original sizes (from partition)
+    Returns:
+        x: (B, H, W, D, C)
     """
     Wh, Ww, Wd = window_size
-    B = int(windows.shape[0] / (H * W * D / (Wh * Ww * Wd)))
     C = windows.shape[-1]
 
-    # Calculate padded sizes
-    Hp = (H + Wh - 1) // Wh * Wh
-    Wp = (W + Ww - 1) // Ww * Ww
-    Dp = (D + Wd - 1) // Wd * Wd
-
     x = windows.view(B,
-                     Hp // Wh, Wp // Ww, Dp // Wd,
+                     H // Wh, W // Ww, D // Wd,
                      Wh, Ww, Wd, C)
 
-    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, Hp, Wp, Dp, C)
-
-    # Crop back to original size
-    x = x[:, :H, :W, :D, :].contiguous()
+    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, H, W, D, C)
     return x
 
 def trunc_normal_(tensor, mean=0., std=1.):
@@ -290,12 +231,11 @@ class SwinTransformerBlock3D(nn.Module):
             self.shift_size = (0, 0, 0)
             self.window_size = tuple(min(i) for i in zip(self.input_resolution, self.window_size))
 
-        # sanity check
         for s, w in zip(self.shift_size, self.window_size):
             assert 0 <= s < w, "shift_size must be in 0-window_size"
 
         self.norm1 = norm_layer(dim)
-        self.attn = WindowAttention3D(  # <<< needs 3D version of WindowAttention
+        self.attn = WindowAttention3D(
             dim, window_size=self.window_size, num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop)
@@ -311,7 +251,6 @@ class SwinTransformerBlock3D(nn.Module):
             H, W, D = self.input_resolution
             img_mask = torch.zeros((1, H, W, D, 1))  # 1 H W D 1
 
-            # slices for shift
             h_slices = (slice(0, -self.window_size[0]),
                         slice(-self.window_size[0], -self.shift_size[0]),
                         slice(-self.shift_size[0], None))
@@ -329,7 +268,7 @@ class SwinTransformerBlock3D(nn.Module):
                         img_mask[:, h, w, d, :] = cnt
                         cnt += 1
 
-            mask_windows = window_partition_3d(img_mask, self.window_size)  # nW, Wh, Ww, Wd, 1
+            mask_windows, _, _, _, _ = window_partition_3d(img_mask, self.window_size)  # nW, Wh, Ww, Wd, 1
             mask_windows = mask_windows.view(-1, self.window_size[0] *
                                                   self.window_size[1] *
                                                   self.window_size[2])
@@ -359,8 +298,8 @@ class SwinTransformerBlock3D(nn.Module):
         else:
             shifted_x = x
 
-        # partition windows
-        x_windows = window_partition_3d(shifted_x, self.window_size)  # nW*B, Wh, Ww, Wd, C
+        # partition windows (new call: returns windows and original dims)
+        x_windows, B, H, W, D = window_partition_3d(shifted_x, self.window_size)  
         x_windows = x_windows.view(-1,
                                    self.window_size[0] * self.window_size[1] * self.window_size[2],
                                    C)
@@ -368,12 +307,12 @@ class SwinTransformerBlock3D(nn.Module):
         # W-MSA/SW-MSA
         attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, N, C
 
-        # merge windows
+        # merge windows (new call: pass B,H,W,D back)
         attn_windows = attn_windows.view(-1,
                                          self.window_size[0],
                                          self.window_size[1],
                                          self.window_size[2], C)
-        shifted_x = window_reverse_3d(attn_windows, self.window_size, H, W, D)  # B H W D C
+        shifted_x = window_reverse_3d(attn_windows, self.window_size, B, H, W, D)  # B H W D C
 
         # reverse cyclic shift
         if any(s > 0 for s in self.shift_size):
