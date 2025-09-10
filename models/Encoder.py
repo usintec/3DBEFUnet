@@ -6,10 +6,7 @@ from utils import *
 # from einops import rearrange
 from einops.layers.torch import Rearrange
 from utils import BasicLayer3D, PatchMerging3D, trunc_normal_
-
-
-import torch
-import torch.nn as nn
+from torch.nn import functional as F
 from timm.models.layers import trunc_normal_
 
 
@@ -294,31 +291,39 @@ class All2Cross3D(nn.Module):
             out.add('pos_embed')
         return out
 
-    def resize_pos_embed(self, pos_embed, target_len):
+    def resize_pos_embed(self, pos_embed, target_len, target_shape):
         """
-        Resize positional embeddings to match target sequence length.
+        Resize positional embeddings to match target sequence length and shape.
+        
         Args:
             pos_embed: (1, L_pos, C)
-            target_len: int (L)
+            target_len: int (L) = product of target_shape
+            target_shape: tuple (Dp, Hp, Wp) = patch grid shape
         Returns:
             resized_pos_embed: (1, target_len, C)
         """
-        from torch.nn import functional as F
         _, L_pos, C = pos_embed.shape
+        Dp, Hp, Wp = target_shape
 
         if L_pos == target_len:
             return pos_embed
 
-        # assume cubic embedding (reshape to 3D grid)
-        L = int(round(L_pos ** (1/3)))
-        T = int(round(target_len ** (1/3)))
-        pos_embed = pos_embed.reshape(1, L, L, L, C).permute(0, 4, 1, 2, 3)  # (1, C, L, L, L)
+        # Infer original 3D grid from L_pos
+        Ld = round((L_pos) ** (1/3))  # fallback
+        while (L_pos % Ld) != 0 and Ld > 1:
+            Ld -= 1
+        Lh = Lw = int((L_pos // Ld) ** 0.5)
 
-        # interpolate to new size
-        pos_embed = F.interpolate(pos_embed, size=(T, T, T), mode='trilinear', align_corners=False)
+        # reshape to (1, C, D, H, W)
+        pos_embed = pos_embed.reshape(1, Ld, Lh, Lw, C).permute(0, 4, 1, 2, 3)  # (1, C, D, H, W)
 
-        pos_embed = pos_embed.permute(0, 2, 3, 4, 1).reshape(1, T*T*T, C)
+        # interpolate to new grid
+        pos_embed = F.interpolate(pos_embed, size=(Dp, Hp, Wp), mode='trilinear', align_corners=False)
+
+        # back to (1, L, C)
+        pos_embed = pos_embed.permute(0, 2, 3, 4, 1).reshape(1, target_len, C)
         return pos_embed
+
 
     def forward(self, x):
         """
@@ -328,8 +333,11 @@ class All2Cross3D(nn.Module):
 
         if self.cross_pos_embed:
             for i in range(self.num_branches):
-                # dynamically resize positional embedding
-                xs[i] = xs[i] + self.resize_pos_embed(self.pos_embed[i], xs[i].shape[1])
+                B, N, C = xs[i].shape
+                # derive 3D patch grid from N
+                Dp = int(round((N) ** (1/3)))
+                Hp = Wp = int(round((N / Dp) ** 0.5))
+                xs[i] = xs[i] + self.resize_pos_embed(self.pos_embed[i], N, (Dp, Hp, Wp))
 
         for blk in self.blocks:
             xs = blk(xs)
