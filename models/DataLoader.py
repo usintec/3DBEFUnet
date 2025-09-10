@@ -120,7 +120,9 @@ class BraTSDataset(Dataset):
     def __getitem__(self, idx):
         case_dir = self.case_dirs[idx]
         files = sorted(glob.glob(os.path.join(case_dir, "*.nii*")))
-        assert len(files) == 5, f"Expected 5 files in {case_dir}, found {len(files)}"
+
+        # Training set has 5 files (4 modalities + seg), validation has 4 (no seg)
+        assert len(files) in [4, 5], f"Expected 4 or 5 files in {case_dir}, found {len(files)}"
 
         # Load 4 MRI modalities (T1, T1CE, T2, FLAIR)
         modalities = []
@@ -132,29 +134,32 @@ class BraTSDataset(Dataset):
                 modalities.append(img)
         modalities = np.stack(modalities, axis=0)  # (4, H, W, D)
 
-        # Load segmentation map
-        seg_file = [f for f in files if "seg" in f][0]
-        seg = nib.load(seg_file).get_fdata()
-        seg = resize_volume(seg, self.target_shape)
+        # Try to load segmentation (only available for training set)
+        seg_files = [f for f in files if "seg" in f]
+        if len(seg_files) > 0:
+            seg = nib.load(seg_files[0]).get_fdata()
+            seg = resize_volume(seg, self.target_shape)
 
-        # 🔑 Remap BraTS labels: {0,1,2,4} → {0,1,2,3}
-        seg = seg.astype(np.int32)
-        seg[seg == 4] = 3
+            # 🔑 Remap BraTS labels: {0,1,2,4} → {0,1,2,3}
+            seg = seg.astype(np.int32)
+            seg[seg == 4] = 3
 
-        # Augmentation (only if training)
-        if self.transform:
-            modalities, seg = augment(modalities, seg)
+            # Augmentation (only if training)
+            if self.transform:
+                modalities, seg = augment(modalities, seg)
 
-        # Convert to tensors
+            seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
+        else:
+            seg = None  # No ground truth available (e.g., validation)
+
+        # Convert modalities to tensor
         modalities = torch.tensor(modalities, dtype=torch.float32)  # (4,H,W,D)
-        seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
 
         return {
             "image": modalities,
             "label": seg,
             "case_name": os.path.basename(case_dir)
         }
-
 
 
 # =========================
