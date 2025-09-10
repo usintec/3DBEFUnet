@@ -137,6 +137,10 @@ class BraTSDataset(Dataset):
         seg = nib.load(seg_file).get_fdata()
         seg = resize_volume(seg, self.target_shape)
 
+        # 🔑 Remap BraTS labels: {0,1,2,4} → {0,1,2,3}
+        seg = seg.astype(np.int32)
+        seg[seg == 4] = 3
+
         # Augmentation (only if training)
         if self.transform:
             modalities, seg = augment(modalities, seg)
@@ -150,6 +154,7 @@ class BraTSDataset(Dataset):
             "label": seg,
             "case_name": os.path.basename(case_dir)
         }
+
 
 
 # =========================
