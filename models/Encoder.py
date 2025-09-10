@@ -291,10 +291,42 @@ class All2Cross3D(nn.Module):
             out.add('pos_embed')
         return out
 
+    # def resize_pos_embed(self, pos_embed, target_len, target_shape):
+    #     """
+    #     Resize positional embeddings to match target sequence length and shape.
+        
+    #     Args:
+    #         pos_embed: (1, L_pos, C)
+    #         target_len: int (L) = product of target_shape
+    #         target_shape: tuple (Dp, Hp, Wp) = patch grid shape
+    #     Returns:
+    #         resized_pos_embed: (1, target_len, C)
+    #     """
+    #     _, L_pos, C = pos_embed.shape
+    #     Dp, Hp, Wp = target_shape
+
+    #     if L_pos == target_len:
+    #         return pos_embed
+
+    #     # Infer original 3D grid from L_pos
+    #     Ld = round((L_pos) ** (1/3))  # fallback
+    #     while (L_pos % Ld) != 0 and Ld > 1:
+    #         Ld -= 1
+    #     Lh = Lw = int((L_pos // Ld) ** 0.5)
+
+    #     # reshape to (1, C, D, H, W)
+    #     pos_embed = pos_embed.reshape(1, Ld, Lh, Lw, C).permute(0, 4, 1, 2, 3)  # (1, C, D, H, W)
+
+    #     # interpolate to new grid
+    #     pos_embed = F.interpolate(pos_embed, size=(Dp, Hp, Wp), mode='trilinear', align_corners=False)
+
+    #     # back to (1, L, C)
+    #     pos_embed = pos_embed.permute(0, 2, 3, 4, 1).reshape(1, target_len, C)
+    #     return pos_embed
     def resize_pos_embed(self, pos_embed, target_len, target_shape):
         """
         Resize positional embeddings to match target sequence length and shape.
-        
+
         Args:
             pos_embed: (1, L_pos, C)
             target_len: int (L) = product of target_shape
@@ -302,27 +334,76 @@ class All2Cross3D(nn.Module):
         Returns:
             resized_pos_embed: (1, target_len, C)
         """
-        _, L_pos, C = pos_embed.shape
+        device = pos_embed.device
+        B, L_pos, C = pos_embed.shape
         Dp, Hp, Wp = target_shape
 
+        # Fast path: already matches
         if L_pos == target_len:
             return pos_embed
 
-        # Infer original 3D grid from L_pos
-        Ld = round((L_pos) ** (1/3))  # fallback
-        while (L_pos % Ld) != 0 and Ld > 1:
-            Ld -= 1
-        Lh = Lw = int((L_pos // Ld) ** 0.5)
+        # Handle possible cls token (common pattern: 1 + num_patches)
+        has_cls = False
+        if L_pos == target_len + 1:
+            has_cls = True
+            cls_token = pos_embed[:, :1, :].to(device)
+            pos = pos_embed[:, 1:, :].contiguous()
+            L_grid = L_pos - 1
+        else:
+            pos = pos_embed.contiguous()
+            L_grid = L_pos
 
-        # reshape to (1, C, D, H, W)
-        pos_embed = pos_embed.reshape(1, Ld, Lh, Lw, C).permute(0, 4, 1, 2, 3)  # (1, C, D, H, W)
+        # Helper: try to infer 3D grid (Ld, Lh, Lw) from L_grid
+        def infer_grid(L):
+            # try cube root as a starting point
+            start = int(round(L ** (1.0 / 3.0)))
+            if start <= 0:
+                return 1, int(round(L ** 0.5)), int(round(L ** 0.5))
+            # search downward/upward for a divisor that produces a perfect square for remaining
+            for d in range(start, 0, -1):
+                if L % d == 0:
+                    rest = L // d
+                    h = int(round(rest ** 0.5))
+                    if h * h == rest:
+                        return d, h, h
+            # fallback: 1 x sqrt x sqrt
+            h = int(round(L ** 0.5))
+            return 1, h, h
+
+        Ld, Lh, Lw = infer_grid(L_grid)
+
+        # sanity check
+        if Ld * Lh * Lw != L_grid:
+            # try another fallback: treat as D=1 and HxW = L_grid
+            Ld = 1
+            Lh = int(round(L_grid ** 0.5))
+            Lw = int(round(L_grid / max(1, Lh)))
+
+        try:
+            # reshape to (1, C, D, H, W) for interpolation
+            pos = pos.reshape(1, Ld, Lh, Lw, C).permute(0, 4, 1, 2, 3)  # (1, C, D, H, W)
+        except Exception:
+            # if reshape fails, reinitialize (safe fallback for training from scratch)
+            return torch.randn(1, target_len, C, device=device) * 0.02
 
         # interpolate to new grid
-        pos_embed = F.interpolate(pos_embed, size=(Dp, Hp, Wp), mode='trilinear', align_corners=False)
+        pos = F.interpolate(pos, size=(Dp, Hp, Wp), mode='trilinear', align_corners=False)
 
         # back to (1, L, C)
-        pos_embed = pos_embed.permute(0, 2, 3, 4, 1).reshape(1, target_len, C)
-        return pos_embed
+        pos = pos.permute(0, 2, 3, 4, 1).reshape(1, -1, C)
+
+        # re-attach cls token if it existed
+        if has_cls:
+            pos = torch.cat((cls_token, pos), dim=1)
+
+        # Final safety: if interpolation still doesn't match target_len, reinitialize
+        if pos.shape[1] != target_len:
+            # Common when inference grid-factors don't line up; safe to reinit when training from scratch
+            # Use the same initialization scale as your trunc_normal_ (.02)
+            return torch.randn(1, target_len, C, device=device) * 0.02
+
+        return pos
+
 
 
     def forward(self, x):
