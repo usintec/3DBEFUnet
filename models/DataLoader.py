@@ -119,23 +119,30 @@ class BraTSDataset(Dataset):
     
     def __getitem__(self, idx):
         case_dir = self.case_dirs[idx]
-        files = sorted(glob.glob(os.path.join(case_dir, "*.nii*")))
 
-        # Training set has 5 files (4 modalities + seg), validation has 4 (no seg)
-        assert len(files) in [4, 5], f"Expected 4 or 5 files in {case_dir}, found {len(files)}"
+        # Explicitly filter only the 4 modalities
+        modality_files = {
+            "t1": glob.glob(os.path.join(case_dir, "*t1.nii*")),
+            "t1ce": glob.glob(os.path.join(case_dir, "*t1ce.nii*")),
+            "t2": glob.glob(os.path.join(case_dir, "*t2.nii*")),
+            "flair": glob.glob(os.path.join(case_dir, "*flair.nii*")),
+        }
 
-        # Load 4 MRI modalities (T1, T1CE, T2, FLAIR)
+        # Make sure we found exactly one file for each modality
+        for k, v in modality_files.items():
+            assert len(v) == 1, f"Missing or duplicate {k} modality in {case_dir}"
+
+        # Load 4 MRI modalities
         modalities = []
-        for f in files:
-            if "seg" not in f:
-                img = nib.load(f).get_fdata()
-                img = normalize(img)
-                img = resize_volume(img, self.target_shape)
-                modalities.append(img)
+        for key in ["t1", "t1ce", "t2", "flair"]:
+            img = nib.load(modality_files[key][0]).get_fdata()
+            img = normalize(img)
+            img = resize_volume(img, self.target_shape)
+            modalities.append(img)
         modalities = np.stack(modalities, axis=0)  # (4, H, W, D)
 
-        # Try to load segmentation (only available for training set)
-        seg_files = [f for f in files if "seg" in f]
+        # Load segmentation if available
+        seg_files = glob.glob(os.path.join(case_dir, "*seg.nii*"))
         if len(seg_files) > 0:
             seg = nib.load(seg_files[0]).get_fdata()
             seg = resize_volume(seg, self.target_shape)
@@ -144,15 +151,13 @@ class BraTSDataset(Dataset):
             seg = seg.astype(np.int32)
             seg[seg == 4] = 3
 
-            # Augmentation (only if training)
             if self.transform:
                 modalities, seg = augment(modalities, seg)
 
             seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
         else:
-            seg = None  # No ground truth available (e.g., validation)
+            seg = None  # No ground truth in validation
 
-        # Convert modalities to tensor
         modalities = torch.tensor(modalities, dtype=torch.float32)  # (4,H,W,D)
 
         return {
@@ -160,6 +165,7 @@ class BraTSDataset(Dataset):
             "label": seg,
             "case_name": os.path.basename(case_dir)
         }
+
 
 
 # =========================
