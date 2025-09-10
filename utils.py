@@ -32,12 +32,8 @@ def window_partition_3d(x, window_size):
     Args:
         x: (B, H, W, D, C)
         window_size: int or tuple of 3 ints
-    Returns:
-        windows: (num_windows*B, Wh, Ww, Wd, C)
-        B, H, W, D: original sizes (before partition)
     """
     B, H, W, D, C = x.shape
-
     if isinstance(window_size, int):
         window_size = (window_size, window_size, window_size)
     Wh, Ww, Wd = window_size
@@ -46,7 +42,6 @@ def window_partition_3d(x, window_size):
     pad_h = (Wh - H % Wh) % Wh
     pad_w = (Ww - W % Ww) % Ww
     pad_d = (Wd - D % Wd) % Wd
-
     if pad_h > 0 or pad_w > 0 or pad_d > 0:
         x = F.pad(x, (0, 0, 0, pad_d, 0, pad_w, 0, pad_h))
         _, H, W, D, _ = x.shape
@@ -57,9 +52,8 @@ def window_partition_3d(x, window_size):
                W // Ww, Ww,
                D // Wd, Wd,
                C)
-
     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, Wh, Ww, Wd, C)
-    return windows, B, H, W, D
+    return windows
 
 
 def window_reverse_3d(windows, window_size, B, H, W, D):
