@@ -96,6 +96,18 @@ def augment(modalities, seg):
         modalities = modalities + noise
 
     return modalities, seg
+def custom_collate(batch):
+    images = torch.stack([item["image"] for item in batch], dim=0)
+    labels = [item["label"] for item in batch]  # may include None
+    case_names = [item["case_name"] for item in batch]
+
+    # stack labels only if all are not None
+    if all(lbl is not None for lbl in labels):
+        labels = torch.stack(labels, dim=0)
+    else:
+        labels = None
+
+    return {"image": images, "label": labels, "case_name": case_names}
 
 # =========================
 # BraTS Dataset Class
@@ -183,7 +195,21 @@ def get_train_val_loaders(data_dir, batch_size=2, target_shape=(128,128,128)):
     val_dataset   = BraTSDataset(val_cases, transform=False, target_shape=target_shape)   # no augmentation
 
     # Create loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader   = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        collate_fn=custom_collate   # ✅ use safe collate
+        )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,      # often safer to use 1 for validation
+        shuffle=False,
+        num_workers=4,
+        collate_fn=custom_collate   # ✅ handles None labels
+        )
+
 
     return train_loader, val_loader
