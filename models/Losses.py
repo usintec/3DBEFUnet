@@ -87,7 +87,10 @@ class ClassWiseDiscriminativeLoss(nn.Module):
                 dist_loss /= (len(class_means) * (len(class_means) - 1))
 
             # regularization (keep embeddings close to origin)
-            reg_loss = torch.mean(torch.norm(torch.stack(class_means), dim=1))
+            if len(class_means) > 1:
+                reg_loss = torch.mean(torch.norm(torch.stack(class_means), dim=1))
+            else:
+                reg_loss = torch.norm(class_means[0])  # single tensor case
 
             total_loss += (self.param_var * var_loss +
                         self.param_dist * dist_loss +
