@@ -26,54 +26,72 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
+import torch
+import torch.nn.functional as F
+
 def window_partition_3d(x, window_size):
     """
     Partition 3D feature maps into non-overlapping windows.
     Args:
         x: (B, H, W, D, C)
-        window_size: int or tuple of 3 ints
+        window_size: tuple (Wh, Ww, Wd)
+    Returns:
+        windows: (num_windows*B, Wh, Ww, Wd, C)
     """
     B, H, W, D, C = x.shape
-    if isinstance(window_size, int):
-        window_size = (window_size, window_size, window_size)
     Wh, Ww, Wd = window_size
 
-    # Pad so divisible by window_size
+    # pad so dimensions are divisible by window_size
     pad_h = (Wh - H % Wh) % Wh
     pad_w = (Ww - W % Ww) % Ww
     pad_d = (Wd - D % Wd) % Wd
+
     if pad_h > 0 or pad_w > 0 or pad_d > 0:
-        x = F.pad(x, (0, 0, 0, pad_d, 0, pad_w, 0, pad_h))
+        x = F.pad(x, (0, 0, 0, pad_d, 0, pad_w, 0, pad_h))  # pad order: (last_dim,...,first_dim)
         _, H, W, D, _ = x.shape
 
-    # Reshape into windows
-    x = x.view(B,
-               H // Wh, Wh,
-               W // Ww, Ww,
-               D // Wd, Wd,
-               C)
+    # reshape into windows
+    x = x.view(
+        B,
+        H // Wh, Wh,
+        W // Ww, Ww,
+        D // Wd, Wd,
+        C
+    )
+
     windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, Wh, Ww, Wd, C)
     return windows
 
 
-def window_reverse_3d(windows, window_size, B, H, W, D):
+def window_reverse_3d(windows, window_size, H, W, D):
     """
-    Reverse windows back to original 3D feature maps.
+    Reverse 3D windows back to feature maps.
     Args:
         windows: (num_windows*B, Wh, Ww, Wd, C)
         window_size: tuple (Wh, Ww, Wd)
-        B, H, W, D: original sizes (from partition)
+        H, W, D: original sizes (before partitioning)
     Returns:
         x: (B, H, W, D, C)
     """
     Wh, Ww, Wd = window_size
+    B = int(windows.shape[0] / (H * W * D / (Wh * Ww * Wd)))
     C = windows.shape[-1]
 
-    x = windows.view(B,
-                     H // Wh, W // Ww, D // Wd,
-                     Wh, Ww, Wd, C)
+    # padded sizes
+    Hp = (H + Wh - 1) // Wh * Wh
+    Wp = (W + Ww - 1) // Ww * Ww
+    Dp = (D + Wd - 1) // Wd * Wd
 
-    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, H, W, D, C)
+    x = windows.view(
+        B,
+        Hp // Wh, Wp // Ww, Dp // Wd,
+        Wh, Ww, Wd, C
+    )
+
+    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, Hp, Wp, Dp, C)
+
+    # crop back
+    x = x[:, :H, :W, :D, :].contiguous()
     return x
 
 def trunc_normal_(tensor, mean=0., std=1.):
