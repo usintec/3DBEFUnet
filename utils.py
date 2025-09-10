@@ -282,7 +282,7 @@ class SwinTransformerBlock3D(nn.Module):
     def forward(self, x):
         H, W, D = self.input_resolution
         B, L, C = x.shape
-        assert L == H * W * D, "input feature has wrong size"
+        assert L == H * W * D, f"Input feature has wrong size: expected {H*W*D}, got {L}"
 
         shortcut = x
         x = self.norm1(x)
@@ -290,41 +290,47 @@ class SwinTransformerBlock3D(nn.Module):
 
         # cyclic shift
         if any(s > 0 for s in self.shift_size):
-            shifted_x = torch.roll(x,
-                                   shifts=(-self.shift_size[0],
-                                           -self.shift_size[1],
-                                           -self.shift_size[2]),
-                                   dims=(1, 2, 3))
+            shifted_x = torch.roll(
+                x,
+                shifts=(-self.shift_size[0], -self.shift_size[1], -self.shift_size[2]),
+                dims=(1, 2, 3)
+            )
         else:
             shifted_x = x
 
-        # partition windows (new call: returns windows and original dims)
-        x_windows, B, H, W, D = window_partition_3d(shifted_x, self.window_size)  
-        x_windows = x_windows.view(-1,
-                                   self.window_size[0] * self.window_size[1] * self.window_size[2],
-                                   C)
+        # partition windows
+        x_windows = window_partition_3d(shifted_x, self.window_size)  # (nW*B, Wh, Ww, Wd, C)
+        x_windows = x_windows.view(
+            -1,
+            self.window_size[0] * self.window_size[1] * self.window_size[2],
+            C
+        )
 
         # W-MSA/SW-MSA
-        attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, N, C
+        attn_windows = self.attn(x_windows, mask=self.attn_mask)  # (nW*B, N, C)
 
-        # merge windows (new call: pass B,H,W,D back)
-        attn_windows = attn_windows.view(-1,
-                                         self.window_size[0],
-                                         self.window_size[1],
-                                         self.window_size[2], C)
-        shifted_x = window_reverse_3d(attn_windows, self.window_size, B, H, W, D)  # B H W D C
+        # merge windows
+        attn_windows = attn_windows.view(
+            -1,
+            self.window_size[0],
+            self.window_size[1],
+            self.window_size[2], C
+        )
+        shifted_x = window_reverse_3d(attn_windows, self.window_size, B, H, W, D)  # (B, H, W, D, C)
 
         # reverse cyclic shift
         if any(s > 0 for s in self.shift_size):
-            x = torch.roll(shifted_x,
-                           shifts=(self.shift_size[0],
-                                   self.shift_size[1],
-                                   self.shift_size[2]),
-                           dims=(1, 2, 3))
+            x = torch.roll(
+                shifted_x,
+                shifts=(self.shift_size[0], self.shift_size[1], self.shift_size[2]),
+                dims=(1, 2, 3)
+            )
         else:
             x = shifted_x
 
-        x = x.view(B, H * W * D, C)
+        # dynamically infer spatial dims (important fix!)
+        H_new, W_new, D_new = x.shape[1:4]
+        x = x.view(B, H_new * W_new * D_new, C)
 
         # FFN
         x = shortcut + self.drop_path(x)
