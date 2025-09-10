@@ -221,122 +221,6 @@ class PyramidFeatures3D(nn.Module):
             torch.cat((sw1_cls, sw1_skipped), dim=1),
             torch.cat((sw4_cls, fm4_sw4_skipped), dim=1),
         ]
-
-# class PyramidFeatures3D(nn.Module):
-#     def __init__(self, config, img_size=(128, 128, 128), in_channels=1):
-#         """
-#         Backwards-compatible PyramidFeatures3D that accepts:
-#             - config
-#             - img_size: tuple (D, H, W)
-#             - in_channels: number of input channels (usually 1)
-#         """
-#         super().__init__()
-
-#         # Ensure img_size is always a tuple of 3 ints
-#         if isinstance(img_size, int):
-#             depth = height = width = img_size
-#         elif isinstance(img_size, (tuple, list)) and len(img_size) == 3:
-#             depth, height, width = img_size
-#             print(depth, height, width)
-#         else:
-#             raise ValueError(f"img_size must be int or tuple of 3 ints, got {img_size}")
-
-
-#         # unpack img_size for backwards compatibility
-#         # depth, height, width = img_size
-
-#         # Swin backbone (3D)
-#         self.swin_transformer = SwinTransformer3D(
-#             (depth, height, width), in_chans=in_channels  # MRI → usually single-channel
-#         )
-
-#         # Build PiDiNet3D and load pretrained PDC weights (kept from original code)
-#         pidinet = PiDiNet3D(30, config_model(config.pdcs), dil=12, sa=True).eval()
-
-#         # load PDC weights if path provided
-#         if hasattr(config, "PDC_pretrained_path") and config.PDC_pretrained_path:
-#             checkpoint_PDC = torch.load(config.PDC_pretrained_path, map_location="cpu")
-#             state_dict = checkpoint_PDC.get("state_dict", checkpoint_PDC)
-#             from collections import OrderedDict
-#             new_state_dict = OrderedDict()
-#             for k, v in state_dict.items():
-#                 # handle 'module.' prefix if present
-#                 name = k[7:] if k.startswith("module.") else k
-#                 new_state_dict[name] = v
-#             pidinet.load_state_dict(new_state_dict)
-#         else:
-#             # if no pretrained path, warn (but keep the pidinet with random init)
-#             print("Warning: PDC_pretrained_path not found in config — PiDiNet3D will remain randomly initialized.")
-
-#         # keep the first N layers as in original implementation
-#         self.pidinet_layers = nn.ModuleList(pidinet.children())[:17]
-
-#         # 3D channel projection layers (same shapes as original code; uses config)
-#         self.p1_ch = nn.Conv3d(config.cnn_pyramid_fm[0], config.swin_pyramid_fm[0], kernel_size=1, stride=4)
-#         self.p2_ch = nn.Conv3d(config.cnn_pyramid_fm[1], config.swin_pyramid_fm[1], kernel_size=1, stride=4)
-#         self.p3_ch = nn.Conv3d(config.cnn_pyramid_fm[2], config.swin_pyramid_fm[2], kernel_size=1, stride=4)
-#         self.p4_ch = nn.Conv3d(config.cnn_pyramid_fm[3], config.swin_pyramid_fm[3], kernel_size=1, stride=4)
-
-#         # 3D patch merging (use floor division to ensure ints)
-#         self.p1_pm = PatchMerging3D((depth // 4, height // 4, width // 4), config.swin_pyramid_fm[0])
-#         self.p2_pm = PatchMerging3D((depth // 8, height // 8, width // 8), config.swin_pyramid_fm[1])
-#         self.p3_pm = PatchMerging3D((depth // 16, height // 16, width // 16), config.swin_pyramid_fm[2])
-
-#         # norms + pooling
-#         self.norm_1 = nn.LayerNorm(config.swin_pyramid_fm[0])
-#         self.avgpool_1 = nn.AdaptiveAvgPool1d(1)
-#         self.norm_2 = nn.LayerNorm(config.swin_pyramid_fm[3])
-#         self.avgpool_2 = nn.AdaptiveAvgPool1d(1)
-
-#     def forward(self, x):
-#         # ----- Level 1 -----
-#         for i in range(4):
-#             x = self.pidinet_layers[i](x)
-#         fm1 = x
-#         fm1_ch = self.p1_ch(fm1)
-#         fm1_reshaped = fm1_ch.flatten(2).transpose(1, 2)   # (B, DHW, C)
-#         sw1 = self.swin_transformer.layers[0](fm1_reshaped)
-#         sw1_skipped = fm1_reshaped + sw1
-#         norm1 = self.norm_1(sw1_skipped)
-#         sw1_cls = self.avgpool_1(norm1.transpose(1, 2))
-#         sw1_cls = Rearrange("b c 1 -> b 1 c")(sw1_cls)
-#         fm1_sw1 = self.p1_pm(sw1_skipped)
-
-#         # ----- Level 2 -----
-#         fm1_sw2 = self.swin_transformer.layers[1](fm1_sw1)
-#         for i in range(4, 8):
-#             fm1 = self.pidinet_layers[i](fm1)
-#         fm2_ch = self.p2_ch(fm1)
-#         fm2_reshaped = fm2_ch.flatten(2).transpose(1, 2)
-#         fm2_sw2_skipped = fm2_reshaped + fm1_sw2
-#         fm2_sw2 = self.p2_pm(fm2_sw2_skipped)
-
-#         # ----- Level 3 -----
-#         fm2_sw3 = self.swin_transformer.layers[2](fm2_sw2)
-#         for i in range(8, 12):
-#             fm1 = self.pidinet_layers[i](fm1)
-#         fm3_ch = self.p3_ch(fm1)
-#         fm3_reshaped = fm3_ch.flatten(2).transpose(1, 2)
-#         fm3_sw3_skipped = fm3_reshaped + fm2_sw3
-#         fm3_sw3 = self.p3_pm(fm3_sw3_skipped)
-
-#         # ----- Level 4 -----
-#         fm3_sw4 = self.swin_transformer.layers[3](fm3_sw3)
-#         for i in range(12, 16):
-#             fm1 = self.pidinet_layers[i](fm1)
-#         fm4_ch = self.p4_ch(fm1)
-#         fm4_reshaped = fm4_ch.flatten(2).transpose(1, 2)
-#         fm4_sw4_skipped = fm4_reshaped + fm3_sw4
-#         norm2 = self.norm_2(fm4_sw4_skipped)
-#         sw4_cls = self.avgpool_2(norm2.transpose(1, 2))
-#         sw4_cls = Rearrange("b c 1 -> b 1 c")(sw4_cls)
-
-#         return [
-#             torch.cat((sw1_cls, sw1_skipped), dim=1),
-#             torch.cat((sw4_cls, fm4_sw4_skipped), dim=1),
-#         ]
-
-
 # 3D MSF Module
 class All2Cross3D(nn.Module):
     def __init__(self, config, img_size=(128,128,128), in_chans=4, embed_dim=(96, 768), norm_layer=nn.LayerNorm):
@@ -393,7 +277,7 @@ class All2Cross3D(nn.Module):
                 trunc_normal_(self.pos_embed[i], std=.02)
 
         self.apply(self._init_weights)
-    
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -410,6 +294,32 @@ class All2Cross3D(nn.Module):
             out.add('pos_embed')
         return out
 
+    def resize_pos_embed(self, pos_embed, target_len):
+        """
+        Resize positional embeddings to match target sequence length.
+        Args:
+            pos_embed: (1, L_pos, C)
+            target_len: int (L)
+        Returns:
+            resized_pos_embed: (1, target_len, C)
+        """
+        from torch.nn import functional as F
+        _, L_pos, C = pos_embed.shape
+
+        if L_pos == target_len:
+            return pos_embed
+
+        # assume cubic embedding (reshape to 3D grid)
+        L = int(round(L_pos ** (1/3)))
+        T = int(round(target_len ** (1/3)))
+        pos_embed = pos_embed.reshape(1, L, L, L, C).permute(0, 4, 1, 2, 3)  # (1, C, L, L, L)
+
+        # interpolate to new size
+        pos_embed = F.interpolate(pos_embed, size=(T, T, T), mode='trilinear', align_corners=False)
+
+        pos_embed = pos_embed.permute(0, 2, 3, 4, 1).reshape(1, T*T*T, C)
+        return pos_embed
+
     def forward(self, x):
         """
         x: (B, C, D, H, W)
@@ -418,10 +328,100 @@ class All2Cross3D(nn.Module):
 
         if self.cross_pos_embed:
             for i in range(self.num_branches):
-                xs[i] += self.pos_embed[i]
+                # dynamically resize positional embedding
+                xs[i] = xs[i] + self.resize_pos_embed(self.pos_embed[i], xs[i].shape[1])
 
         for blk in self.blocks:
             xs = blk(xs)
 
         xs = [self.norm[i](x) for i, x in enumerate(xs)]
         return xs
+
+# # 3D MSF Module
+# class All2Cross3D(nn.Module):
+#     def __init__(self, config, img_size=(128,128,128), in_chans=4, embed_dim=(96, 768), norm_layer=nn.LayerNorm):
+#         """
+#         Args:
+#             config: model configuration
+#             img_size (tuple): (D, H, W) of the input MRI volume
+#             in_chans (int): number of input channels (1 for MRI)
+#             embed_dim (tuple): embedding dimensions for each branch
+#         """
+#         super().__init__()
+#         self.cross_pos_embed = config.cross_pos_embed
+#         self.pyramid = PyramidFeatures3D(config=config, img_size=img_size, in_channels=in_chans)  # <-- upgraded PyramidFeatures3D
+
+#         D, H, W = img_size
+#         patch_d, patch_h, patch_w = config.patch_size  # must be a tuple (d,h,w)
+
+#         # number of patches in 3D
+#         n_p1 = (D // patch_d) * (H // patch_h) * (W // patch_w)
+#         n_p2 = (D // (patch_d*8)) * (H // (patch_h*8)) * (W // (patch_w*8))
+#         num_patches = (n_p1, n_p2)
+
+#         self.num_branches = 2
+
+#         # 3D positional embeddings
+#         self.pos_embed = nn.ParameterList([
+#             nn.Parameter(torch.zeros(1, 1 + num_patches[i], embed_dim[i])) 
+#             for i in range(self.num_branches)
+#         ])
+
+#         # stochastic depth
+#         total_depth = sum([sum(x[-2:]) for x in config.depth])
+#         dpr = [x.item() for x in torch.linspace(0, config.drop_path_rate, total_depth)]
+#         dpr_ptr = 0
+
+#         self.blocks = nn.ModuleList()
+#         for idx, block_config in enumerate(config.depth):
+#             curr_depth = max(block_config[:-1]) + block_config[-1]
+#             dpr_ = dpr[dpr_ptr:dpr_ptr + curr_depth]
+#             blk = MultiScaleBlock3D(   # <-- must be a 3D variant
+#                 embed_dim, num_patches, block_config,
+#                 num_heads=config.num_heads, mlp_ratio=config.mlp_ratio,
+#                 qkv_bias=config.qkv_bias, qk_scale=config.qk_scale,
+#                 drop=config.drop_rate, attn_drop=config.attn_drop_rate,
+#                 drop_path=dpr_, norm_layer=norm_layer
+#             )
+#             dpr_ptr += curr_depth
+#             self.blocks.append(blk)
+
+#         self.norm = nn.ModuleList([norm_layer(embed_dim[i]) for i in range(self.num_branches)])
+
+#         for i in range(self.num_branches):
+#             if self.pos_embed[i].requires_grad:
+#                 trunc_normal_(self.pos_embed[i], std=.02)
+
+#         self.apply(self._init_weights)
+    
+#     def _init_weights(self, m):
+#         if isinstance(m, nn.Linear):
+#             trunc_normal_(m.weight, std=.02)
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+#         elif isinstance(m, nn.LayerNorm):
+#             nn.init.constant_(m.bias, 0)
+#             nn.init.constant_(m.weight, 1.0)
+
+#     @torch.jit.ignore
+#     def no_weight_decay(self):
+#         out = {'cls_token'}
+#         if self.pos_embed[0].requires_grad:
+#             out.add('pos_embed')
+#         return out
+
+#     def forward(self, x):
+#         """
+#         x: (B, C, D, H, W)
+#         """
+#         xs = self.pyramid(x)  # -> list of feature maps from PyramidFeatures3D
+
+#         if self.cross_pos_embed:
+#             for i in range(self.num_branches):
+#                 xs[i] += self.pos_embed[i]
+
+#         for blk in self.blocks:
+#             xs = blk(xs)
+
+#         xs = [self.norm[i](x) for i, x in enumerate(xs)]
+#         return xs
