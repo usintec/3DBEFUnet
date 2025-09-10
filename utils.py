@@ -74,13 +74,15 @@ def window_reverse_3d(windows, window_size, H, W, D):
         x: (B, H, W, D, C)
     """
     Wh, Ww, Wd = window_size
-    B = int(windows.shape[0] / (H * W * D / (Wh * Ww * Wd)))
     C = windows.shape[-1]
 
     # padded sizes
     Hp = (H + Wh - 1) // Wh * Wh
     Wp = (W + Ww - 1) // Ww * Ww
     Dp = (D + Wd - 1) // Wd * Wd
+
+    # compute batch size directly
+    B = windows.shape[0] // (Hp // Wh * Wp // Ww * Dp // Wd)
 
     x = windows.view(
         B,
@@ -90,9 +92,10 @@ def window_reverse_3d(windows, window_size, H, W, D):
 
     x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, Hp, Wp, Dp, C)
 
-    # crop back
+    # crop back to original
     x = x[:, :H, :W, :D, :].contiguous()
     return x
+
 
 def trunc_normal_(tensor, mean=0., std=1.):
     # Minimal fallback if timm isn't available
