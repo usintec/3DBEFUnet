@@ -114,17 +114,16 @@ def window_partition_3d(x, window_size):
     return windows
 
 
-def window_reverse_3d(windows, original_size, window_size, B):
+def window_reverse_3d(windows, window_size, H, W, D):
     """
     Reverse windows back to original 3D feature maps.
     Args:
         windows: (num_windows*B, Wh, Ww, Wd, C)
-        original_size: tuple (H, W, D) before padding
         window_size: tuple (Wh, Ww, Wd)
-        B: batch size
+        H, W, D: original spatial sizes
     """
-    H, W, D = original_size
     Wh, Ww, Wd = window_size
+    B = int(windows.shape[0] / (H * W * D / (Wh * Ww * Wd)))
     C = windows.shape[-1]
 
     # Calculate padded sizes
@@ -141,9 +140,6 @@ def window_reverse_3d(windows, original_size, window_size, B):
     # Crop back to original size
     x = x[:, :H, :W, :D, :].contiguous()
     return x
-
-'''
-'''
 
 def trunc_normal_(tensor, mean=0., std=1.):
     # Minimal fallback if timm isn't available
