@@ -262,7 +262,7 @@ class SwinTransformerBlock3D(nn.Module):
                         img_mask[:, h, w, d, :] = cnt
                         cnt += 1
 
-            mask_windows, _, _, _, _ = window_partition_3d(img_mask, self.window_size)  # nW, Wh, Ww, Wd, 1
+            mask_windows = window_partition_3d(img_mask, self.window_size)  # (nW, Wh, Ww, Wd, 1)
             mask_windows = mask_windows.view(-1, self.window_size[0] *
                                                   self.window_size[1] *
                                                   self.window_size[2])
@@ -310,7 +310,7 @@ class SwinTransformerBlock3D(nn.Module):
             self.window_size[1],
             self.window_size[2], C
         )
-        shifted_x = window_reverse_3d(attn_windows, self.window_size, B, H, W, D)  # (B, H, W, D, C)
+        shifted_x = window_reverse_3d(attn_windows, self.window_size, H, W, D)  # (B, H, W, D, C)
 
         # reverse cyclic shift
         if any(s > 0 for s in self.shift_size):
@@ -322,7 +322,7 @@ class SwinTransformerBlock3D(nn.Module):
         else:
             x = shifted_x
 
-        # dynamically infer spatial dims (important fix!)
+        # dynamically infer spatial dims
         H_new, W_new, D_new = x.shape[1:4]
         x = x.view(B, H_new * W_new * D_new, C)
 
