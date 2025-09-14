@@ -183,7 +183,7 @@ class BraTSDataset(Dataset):
 # =========================
 # Dataset Split
 # =========================
-def get_train_val_loaders(data_dir, batch_size=2, target_shape=(128,128,128)):
+def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
     all_cases = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
     print(f"Found total {len(all_cases)} cases.")
 

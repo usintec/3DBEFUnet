@@ -7,7 +7,7 @@ from models.Decoder import ConvUpsample3D, SegmentationHead3D
 
 
 class BEFUnet3D(nn.Module):
-    def __init__(self, config, img_size=(128,128,128), in_chans=4, n_classes=4):
+    def __init__(self, config, img_size=(96,96,96), in_chans=4, n_classes=4):
         """
         BEFUnet adapted for 3D MRI brain tumor segmentation.
         Args:
