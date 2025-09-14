@@ -234,6 +234,9 @@ def trainer_3d(args, model, snapshot_path):
 
                     writer.add_scalar('info/lr', lr_, iter_num)
                     writer.add_scalar('info/total_loss', loss.item(), iter_num)
+                    writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
+                    writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
+                    writer.add_scalar('info/loss_dlf', loss_dlf.item(), iter_num)
 
                     logging.info(
                         'iter %d : total %.5f | ce %.5f | dice %.5f | dlf %.5f',
