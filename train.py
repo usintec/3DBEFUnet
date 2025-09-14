@@ -36,9 +36,9 @@ parser.add_argument('--base_lr', type=float, default=0.01,
                     help='segmentation network learning rate')
 parser.add_argument('--num_workers', type=int, default=2,
                     help='number of workers')
-parser.add_argument('--img_size', type=int, default=128,
+parser.add_argument('--img_size', type=int, default=96,
                     help='input patch size (H, W)')
-parser.add_argument('--img_size_d', type=int, default=128,
+parser.add_argument('--img_size_d', type=int, default=96,
                     help='input patch size (D)')
 parser.add_argument('--seed', type=int, default=1234, help='random seed')
 parser.add_argument('--output_dir', type=str,
