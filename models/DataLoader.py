@@ -142,7 +142,10 @@ class BraTSDataset(Dataset):
 
         # Make sure we found exactly one file for each modality
         for k, v in modality_files.items():
-            assert len(v) == 1, f"Missing or duplicate {k} modality in {case_dir}"
+            #assert len(v) == 1, f"Missing or duplicate {k} modality in {case_dir}"
+            if len(v) != 1:
+                print(f"⚠️ Skipping {case_dir}, problem with {k}: {v}")
+                return self.__getitem__((idx+1) % len(self.case_dirs))  # skip to next
 
         # Load 4 MRI modalities
         modalities = []
