@@ -189,16 +189,20 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", type=str, default='/content/drive/MyDrive/outputs/BEFUnet3D',
+    parser.add_argument("--checkpoint", type=str,
+                        default='/content/drive/MyDrive/outputs/BEFUnet3D',
                         help="Path to a single checkpoint .pth or directory of checkpoints")
-    parser.add_argument("--root_path", type=str, help="Dataset root path", default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData')
-    parser.add_argument("--num_classes", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--apply_msc", action="store_true")
-    parser.add_argument('--img_size', type=int, default=96,
-                    help='input patch size (H, W)')
-    parser.add_argument('--num_classes', type=int,
-                    default=4, help='output channel of network (BraTS: 4 classes)')
+    parser.add_argument("--root_path", type=str,
+                        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
+                        help="Dataset root path")
+    parser.add_argument("--num_classes", type=int, default=4,
+                        help="Output channel of network (BraTS: 4 classes)")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Batch size for validation")
+    parser.add_argument("--apply_msc", action="store_true",
+                        help="Apply MeanShift clustering on embeddings")
+    parser.add_argument("--img_size", type=int, default=96,
+                        help="Input patch size for BEFUnet3D (e.g., 96 for 96x96x96)")
     args = parser.parse_args()
 
     # Logging
