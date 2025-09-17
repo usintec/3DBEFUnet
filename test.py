@@ -45,49 +45,40 @@ def validate_model(model, val_loader, args, apply_msc=False):
     Run validation on a dataset and return metrics.
     """
     metric_sum = None
-    num_cases = 0
     msc = MeanShiftClustering(bandwidth=0.5) if apply_msc else None
 
-    with torch.no_grad():
-        for i_batch, sampled_batch in enumerate(tqdm(val_loader, ncols=70)):
-            # ✅ sampled_batch comes from dataset, not the DataLoader itself
-            image = sampled_batch["image"].to(next(model.parameters()).device)
-            label = sampled_batch["label"].to(image.device)
-            case_name = sampled_batch["case_name"][0]
+    for i_batch, sampled_batch in tqdm(enumerate(val_loader), total=len(val_loader), ncols=70):
+        image = sampled_batch["image"].to(next(model.parameters()).device)
+        label = sampled_batch["label"].to(image.device)
+        case_name = sampled_batch["case_name"][0]
 
+        with torch.no_grad():
             seg_logits, embeddings, _ = model(image)
             if apply_msc:
                 seg_logits = msc(embeddings, seg_logits)
             pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)
 
-            prediction_np = pred.squeeze(0).cpu().numpy()
-            label_np = label.squeeze(0).cpu().numpy()
+        prediction_np = pred.squeeze(0).cpu().numpy()
+        label_np = label.squeeze(0).cpu().numpy()
 
-            # Per-class metrics
-            metric_i = []
-            for c in range(1, args.num_classes):
-                metric_i.append(calculate_metric_percase(
-                    (prediction_np == c).astype(np.uint8),
-                    (label_np == c).astype(np.uint8)
-                ))
-            metric_i = np.array(metric_i)
+        # Per-class metrics
+        metric_i = []
+        for c in range(1, args.num_classes):
+            metric_i.append(calculate_metric_percase(
+                (prediction_np == c).astype(np.uint8),
+                (label_np == c).astype(np.uint8)
+            ))
+        metric_i = np.array(metric_i)
 
-            # accumulate
-            if metric_sum is None:
-                metric_sum = metric_i
-            else:
-                metric_sum += metric_i
-            num_cases += 1
+        metric_sum = metric_i if metric_sum is None else metric_sum + metric_i
 
-            logging.info(
-                " idx %d case %s mean_dice %.4f mean_hd95 %.4f",
-                i_batch, case_name,
-                np.mean(metric_i, axis=0)[0],
-                np.mean(metric_i, axis=0)[1]
-            )
+        logging.info(
+            " idx %d case %s mean_dice %.4f mean_hd95 %.4f",
+            i_batch, case_name, np.mean(metric_i, axis=0)[0], np.mean(metric_i, axis=0)[1]
+        )
 
-    # Average across cases (not voxels)
-    metric_mean = metric_sum / num_cases
+    # Average across dataset (per class)
+    metric_mean = metric_sum / len(val_loader.dataset)
     per_class_dice = metric_mean[:, 0]
     per_class_hd95 = metric_mean[:, 1]
 
@@ -105,7 +96,10 @@ def validate_model(model, val_loader, args, apply_msc=False):
 
 def run_evaluations(args):
     from models.DataLoader import get_train_val_loaders
-    val_loader = get_train_val_loaders(args.root_path, batch_size=args.batch_size)
+    # val_loader = get_train_val_loaders(args.root_path, batch_size=args.batch_size)
+    train_loader, val_loader = get_train_val_loaders(
+    args.root_path, batch_size=args.batch_size
+)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info("Using device: %s", device)
