@@ -104,7 +104,7 @@ def run_evaluations(args):
         logging.info("=" * 50)
         logging.info("Evaluating checkpoint: %s", ckpt)
 
-        model = load_model_for_eval(BEFUnet3D, ckpt, device, args.num_classes)
+        model = load_model_for_eval(BEFUnet3D, ckpt, device)
         mean_dice, mean_hd95, per_class_dice, per_class_hd95 = validate_model(
             model, val_loader, args, apply_msc=args.apply_msc
         )
