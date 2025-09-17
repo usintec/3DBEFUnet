@@ -116,7 +116,7 @@ def run_evaluations(args):
         logging.info("=" * 50)
         logging.info("Evaluating checkpoint: %s", ckpt)
 
-        model = load_model_for_eval(BEFUnet3D, ckpt, device)
+        model = load_model_for_eval(BEFUnet3D, ckpt, device, args)
         mean_dice, mean_hd95, per_class_dice, per_class_hd95 = validate_model(
             model, val_loader, args, apply_msc=args.apply_msc
         )
@@ -195,6 +195,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_classes", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--apply_msc", action="store_true")
+    parser.add_argument('--img_size', type=int, default=96,
+                    help='input patch size (H, W)')
+    parser.add_argument('--num_classes', type=int,
+                    default=4, help='output channel of network (BraTS: 4 classes)')
     args = parser.parse_args()
 
     # Logging
