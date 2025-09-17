@@ -14,7 +14,7 @@ from utils import DiceLoss  # uses reduction over all voxels; works for 3D too
 import matplotlib.pyplot as plt
 import pandas as pd
 import datetime
-from models.DataLoader import BraTSDataset, get_train_val_loaders
+from models.DataLoader import get_train_val_loaders
 
 @torch.no_grad()
 @torch.no_grad()
