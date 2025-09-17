@@ -12,17 +12,29 @@ from models.Clustering import MeanShiftClustering
 from models.BEFUnet import BEFUnet3D  # <-- adjust if needed
 
 
-def load_model_for_eval(model_class, checkpoint_path, device):
+import configs.BEFUnet_Config as configs
+
+CONFIGS = {
+    'BEFUnet3D': configs.get_BEFUnet_configs(),
+}
+
+def load_model_for_eval(model_class, checkpoint_path, device, args):
     """
     Load a trained model checkpoint for evaluation.
     """
-    model = model_class()
+    model = model_class(
+        config=CONFIGS['BEFUnet3D'],
+        img_size=(args.img_size, args.img_size, args.img_size),
+        in_chans=4,                  # BraTS has 4 modalities
+        n_classes=args.num_classes   # use CLI arg
+    ).to(device)
+
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint.get("model_state", checkpoint)
     model.load_state_dict(state_dict, strict=True)
-    model = model.to(device)
     model.eval()
     return model
+
 
 
 # Map class indices -> BraTS labels
