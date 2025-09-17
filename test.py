@@ -12,11 +12,11 @@ from models.Clustering import MeanShiftClustering
 from models.BEFUnet import BEFUnet3D  # <-- adjust if needed
 
 
-def load_model_for_eval(model_class, checkpoint_path, device, num_classes):
+def load_model_for_eval(model_class, checkpoint_path, device):
     """
     Load a trained model checkpoint for evaluation.
     """
-    model = model_class(num_classes=num_classes)
+    model = model_class()
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint.get("model_state", checkpoint)
     model.load_state_dict(state_dict, strict=True)
