@@ -196,7 +196,8 @@ def trainer_3d(args, model, snapshot_path):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epochs)
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
-    scaler = torch.cuda.amp.GradScaler(enabled=True)
+    scaler = torch.amp.GradScaler("cuda", enabled=True)
+
 
     # Resume training if checkpoint exists
     model, optimizer, scaler, start_epoch, iter_num = load_checkpoint(
@@ -218,7 +219,7 @@ def trainer_3d(args, model, snapshot_path):
             label_batch = sampled_batch['label'].to(device, non_blocking=True)
 
             try:
-                with torch.cuda.amp.autocast(enabled=True):
+                with torch.amp.autocast("cuda", enabled=True):
                     seg_logits, _, _ = model(image_batch)
                     loss_ce = ce_loss(seg_logits, label_batch.long())
                     loss_gdl = gdl_loss(seg_logits, label_batch)
