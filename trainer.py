@@ -18,25 +18,18 @@ from models.DataLoader import get_train_val_loaders
 
 @torch.no_grad()
 @torch.no_grad()
+@torch.no_grad()
 def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     """
-    3D inference over whole volumes. Expects batch size == 1 from testloader.
-    testloader must yield dicts with keys: 
-      'image': (1,C,D,H,W), 
-      'label': (1,D,H,W), 
-      'case_name': [str]
-
-    Args:
-        model: trained BEFUnet model
-        testloader: dataloader for test set
-        args: arguments with num_classes, etc.
-        test_save_path: optional directory for saving predictions
-        apply_msc: bool, if True → refine segmentation with Mean Shift Clustering (MSC)
+    3D inference with per-class metrics (Dice, HD95).
+    Returns:
+        performance (float): mean Dice across classes
+        mean_hd95 (float): mean HD95 across classes
+        metrics (dict): per-class Dice & HD95, plus mean
     """
     model.eval()
     metric_sum = None  # accumulate per-class metrics (dice, hd95), shape: (C-1, 2)
 
-    # Import MSC module
     from models.Clustering import MeanShiftClustering
     msc = MeanShiftClustering(bandwidth=0.5)
 
@@ -45,22 +38,16 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         label = sampled_batch["label"].cuda(non_blocking=True)   # (1, D, H, W)
         case_name = sampled_batch['case_name'][0]
 
-        # Forward pass → model now returns seg_logits, embeddings, dlf_loss
         seg_logits, embeddings, _ = model(image)
-
-        # Optionally refine with MSC
         if apply_msc:
             seg_logits = msc(embeddings, seg_logits)
 
-        # Prediction
         pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
 
-        # Compute per-case metrics with your utility (expects numpy)
-        from utils import calculate_metric_percase  # must be 3D-aware
+        from utils import calculate_metric_percase
         prediction_np = pred.squeeze(0).cpu().numpy()
         label_np = label.squeeze(0).cpu().numpy()
 
-        # Accumulate metrics per class (1..num_classes-1)
         metric_i = []
         for c in range(1, args.num_classes):
             metric_i.append(calculate_metric_percase((prediction_np == c).astype(np.uint8),
@@ -75,27 +62,57 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         logging.info(' idx %d case %s mean_dice %f mean_hd95 %f',
                      i_batch, case_name, np.mean(metric_i, axis=0)[0], np.mean(metric_i, axis=0)[1])
 
-        # Optional save
-        if test_save_path is not None:
-            # Here you could add NIfTI saving (e.g., using nibabel) if required
-            pass
-
-    # Average over cases
+    # Average over dataset
     metric_mean = metric_sum / len(testloader.dataset)
 
+    class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {i: f"class{i}" for i in range(1, args.num_classes)}
+    per_class_metrics = {}
     for i in range(1, args.num_classes):
-        logging.info('Mean class %d mean_dice %f mean_hd95 %f',
-                     i, metric_mean[i-1][0], metric_mean[i-1][1])
+        dice_i, hd95_i = metric_mean[i-1]
+        per_class_metrics[class_names[i]] = {"dice": float(dice_i), "hd95": float(hd95_i)}
+        logging.info('Mean %s: Dice = %.4f, HD95 = %.4f', class_names[i], dice_i, hd95_i)
 
-    performance = np.mean(metric_mean, axis=0)[0]
-    mean_hd95 = np.mean(metric_mean, axis=0)[1]
-    logging.info('Testing performance (best-val model): mean_dice: %f  mean_hd95: %f',
+    performance = float(np.mean(metric_mean, axis=0)[0])
+    mean_hd95 = float(np.mean(metric_mean, axis=0)[1])
+    per_class_metrics["mean"] = {"dice": performance, "hd95": mean_hd95}
+
+    logging.info('Testing performance (best-val model): mean_dice: %.4f  mean_hd95: %.4f',
                  performance, mean_hd95)
 
-    return performance, mean_hd95
+    # 🔑 Keep backward compatibility
+    return performance, mean_hd95, per_class_metrics
 
+def plot_result(train_loss_history, val_dice_history, snapshot_path, args):
+    """
+    Plots training loss and validation Dice (ET, TC, WT) vs epochs.
+    """
+    epochs = range(1, len(train_loss_history) + 1)
 
-def plot_result(dice, h, snapshot_path, args):
+    # --- Plot training loss ---
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_loss_history, 'b-o', label='Training Loss')
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training Loss vs Epochs")
+    plt.legend()
+
+    # --- Plot per-class Dice ---
+    plt.subplot(1, 2, 2)
+    for k, v in val_dice_history.items():
+        plt.plot(epochs[:len(v)], v, '-o', label=f"Dice {k}")
+    plt.xlabel("Epochs")
+    plt.ylabel("Dice Score")
+    plt.title("Validation Dice vs Epochs")
+    plt.legend()
+
+    plt.tight_layout()
+    out_file = os.path.join(snapshot_path, f"{args.model_name}_training_curves.png")
+    plt.savefig(out_file)
+    plt.close()
+    print(f"✅ Training curves saved at {out_file}")
+
+def plot_result2(dice, h, snapshot_path, args):
     data = {'mean_dice': dice, 'mean_hd95': h}
     df = pd.DataFrame(data)
     resolution_value = 300
@@ -158,8 +175,6 @@ def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
 
     return model, optimizer, scaler, start_epoch, iter_num
 
-from tqdm import tqdm
-
 def trainer_3d(args, model, snapshot_path):
     import datetime, math
     date_and_time = datetime.datetime.now()
@@ -217,15 +232,17 @@ def trainer_3d(args, model, snapshot_path):
     logging.info("%d iterations per epoch", len(train_loader))
 
     best_performance = 0.0
-    patience = getattr(args, "patience", 2)
+    patience = getattr(args, "patience", 5)
     counter = 0
-    dice_hist, hd95_hist = [], []
+
+    # --- For plotting ---
+    train_loss_history = []
+    val_dice_history = {"ET": [], "TC": [], "WT": [], "mean": []}
 
     for epoch_num in range(start_epoch, max_epoch):
         model.train()
         epoch_loss = 0.0
 
-        # ✅ Wrap train_loader with tqdm
         with tqdm(train_loader, desc=f"Epoch [{epoch_num+1}/{max_epoch}]", unit="batch") as pbar:
             for i_batch, sampled_batch in enumerate(pbar):
                 image_batch = sampled_batch['image'].to(device, non_blocking=True)
@@ -236,9 +253,7 @@ def trainer_3d(args, model, snapshot_path):
                         seg_logits, _, _ = model(image_batch)
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_gdl = gdl_loss(seg_logits, label_batch)
-
-                        # ✅ New loss: 0.5 * CE + 0.5 * GDL
-                        loss = 0.5 * loss_ce + 0.5 * loss_gdl
+                        loss = 0.3 * loss_ce + 0.7 * loss_gdl
 
                     optimizer.zero_grad()
                     scaler.scale(loss).backward()
@@ -269,23 +284,27 @@ def trainer_3d(args, model, snapshot_path):
                         raise
 
         avg_epoch_loss = epoch_loss / len(train_loader)
+        train_loss_history.append(avg_epoch_loss)
         logging.info(f"Epoch {epoch_num+1}/{max_epoch} finished, Avg Loss = {avg_epoch_loss:.4f}")
 
-        # Step the scheduler once per epoch
         scheduler.step()
         writer.add_scalar('info/lr', scheduler.get_last_lr()[0], epoch_num)
 
         # 🔑 Validation every eval_interval
         if (epoch_num + 1) % args.eval_interval == 0:
             model.eval()
-            mean_dice, mean_hd95 = inference_3d(model, val_loader, args, test_save_path=test_save_path)
-            dice_hist.append(mean_dice)
-            hd95_hist.append(mean_hd95)
+            mean_dice, mean_hd95, metrics = inference_3d(model, val_loader, args, test_save_path=test_save_path)
 
-            if mean_dice > best_performance:
+            # store per-class Dice
+            for k in val_dice_history.keys():
+                val_dice_history[k].append(metrics[k]["dice"])
+
+            # ✅ Save only if mean_dice beats threshold *and* best_performance
+            min_dice_threshold = 0.430985  # 🔧 adjust as needed
+            if mean_dice >= min_dice_threshold and mean_dice > best_performance:
                 best_performance = mean_dice
                 counter = 0
-                tqdm.write(f"🌟 New best Dice = {mean_dice:.4f} at epoch {epoch_num}")
+                tqdm.write(f"🌟 New best Dice = {mean_dice:.4f} (threshold {min_dice_threshold}) at epoch {epoch_num}")
                 save_checkpoint(
                     {
                         "model_state": model.state_dict(),
@@ -299,13 +318,14 @@ def trainer_3d(args, model, snapshot_path):
                 )
             else:
                 counter += 1
-                tqdm.write(f"No improvement. Patience counter = {counter}/{patience}")
+                tqdm.write(f"⚠️ No save: Dice = {mean_dice:.4f}, best = {best_performance:.4f}, threshold = {min_dice_threshold}")
 
             if counter >= patience:
                 tqdm.write(f"⏹ Early stopping triggered at epoch {epoch_num}")
                 break
             model.train()
 
-    plot_result(dice_hist, hd95_hist, snapshot_path, args)
+    # --- Plot results ---
+    plot_result(train_loss_history, val_dice_history, snapshot_path, args)
     writer.close()
     return "Training Finished!"
