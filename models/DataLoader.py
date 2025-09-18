@@ -12,8 +12,8 @@ from sklearn.model_selection import train_test_split
 def zscore_normalize(img):
     mean, std = np.mean(img), np.std(img)
     if std < 1e-6:
-        return np.zeros_like(img)
-    return (img - mean) / std
+        return np.zeros_like(img, dtype=np.float32)
+    return ((img - mean) / std).astype(np.float32)
 
 def resize_volume(img, target_shape=(128,128,128)):
     factors = (target_shape[0]/img.shape[0],
@@ -22,13 +22,12 @@ def resize_volume(img, target_shape=(128,128,128)):
     return ndimage.zoom(img, factors, order=1).astype(np.float32)
 
 # =========================
-# Crop or Pad Utility
+# Crop or Pad to Target Shape & Patch Alignment
 # =========================
-def crop_or_pad(volume, target_shape=(96,96,96)):
-    """
-    Crop or pad a volume to target_shape.
-    Supports 3D (H,W,D) or 4D (C,H,W,D) volumes.
-    """
+def crop_or_pad(volume, target_shape=(96,96,96), patch_size=4):
+    """Crop or pad a volume to target_shape, aligned to patch_size."""
+    target_shape = [((t + patch_size - 1)//patch_size)*patch_size for t in target_shape]
+    
     if volume.ndim == 3:
         result = np.zeros(target_shape, dtype=volume.dtype)
         slices = [slice(0, min(s,t)) for s,t in zip(volume.shape, target_shape)]
@@ -65,9 +64,9 @@ def crop_foreground(modalities, seg, crop_size=(96,96,96)):
     return mod_crop, seg_crop
 
 # =========================
-# Augmentation
+# Data Augmentation
 # =========================
-def augment(modalities, seg, target_shape=(96,96,96)):
+def augment(modalities, seg, target_shape=(96,96,96), patch_size=4):
     # Random flip
     if random.random() > 0.5:
         modalities = np.flip(modalities, axis=2).copy()
@@ -88,7 +87,7 @@ def augment(modalities, seg, target_shape=(96,96,96)):
     # Random gamma correction (safe)
     if random.random() > 0.5:
         gamma = random.uniform(0.8,1.2)
-        modalities = np.clip(modalities, 0, None)  # avoid negative values
+        modalities = np.clip(modalities, 0, None)
         modalities = np.power(modalities, gamma)
 
     # Gaussian noise
@@ -96,9 +95,9 @@ def augment(modalities, seg, target_shape=(96,96,96)):
         noise = np.random.normal(0,0.01, modalities.shape)
         modalities = modalities + noise
 
-    # Ensure correct size
-    modalities = crop_or_pad(modalities, target_shape)
-    seg = crop_or_pad(seg, target_shape)
+    # Ensure patch-aligned shape
+    modalities = crop_or_pad(modalities, target_shape, patch_size)
+    seg = crop_or_pad(seg, target_shape, patch_size)
 
     return modalities, seg
 
@@ -106,11 +105,12 @@ def augment(modalities, seg, target_shape=(96,96,96)):
 # BraTS Dataset
 # =========================
 class BraTSDataset(Dataset):
-    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96)):
+    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96), patch_size=4):
         self.case_dirs = case_dirs
         self.transform = transform
         self.target_shape = target_shape
         self.crop_size = crop_size
+        self.patch_size = patch_size
         print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
 
     def __len__(self):
@@ -148,7 +148,7 @@ class BraTSDataset(Dataset):
             modalities, seg = crop_foreground(modalities, seg, self.crop_size)
 
             if self.transform:
-                modalities, seg = augment(modalities, seg, self.crop_size)
+                modalities, seg = augment(modalities, seg, self.crop_size, self.patch_size)
 
             seg = torch.tensor(seg, dtype=torch.long)
         else:
@@ -186,12 +186,14 @@ def get_all_cases(data_dir):
     print(f"✅ Using {len(valid_cases)}/{len(all_cases)} cases with labels")
     return valid_cases
 
-def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96), use_weighted_sampler=False):
+def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96), crop_size=(96,96,96), patch_size=4, use_weighted_sampler=False):
     all_cases = get_all_cases(data_dir)
     train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
 
-    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape)
-    val_dataset = BraTSDataset(val_cases, transform=False, target_shape=target_shape)
+    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape,
+                                 crop_size=crop_size, patch_size=patch_size)
+    val_dataset = BraTSDataset(val_cases, transform=False, target_shape=target_shape,
+                               crop_size=crop_size, patch_size=patch_size)
 
     if use_weighted_sampler:
         sampler = make_weighted_sampler(train_dataset)
