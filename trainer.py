@@ -160,7 +160,7 @@ def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
 
 
 def trainer_3d(args, model, snapshot_path):
-    import datetime
+    import datetime, math
     date_and_time = datetime.datetime.now()
 
     os.makedirs(os.path.join(snapshot_path, 'test'), exist_ok=True)
@@ -182,6 +182,15 @@ def trainer_3d(args, model, snapshot_path):
     batch_size = args.batch_size * args.n_gpu
     train_loader, val_loader = get_train_val_loaders(args.root_path, batch_size=batch_size)
 
+    # 🔑 Adjust max_epochs from max_iterations if provided
+    if getattr(args, "max_iterations", None) and args.max_iterations > 0:
+        iters_per_epoch = len(train_loader)
+        args.max_epochs = math.ceil(args.max_iterations / iters_per_epoch)
+        logging.info(
+            "Adjusted max_epochs = %d (from max_iterations = %d, iters/epoch = %d)",
+            args.max_epochs, args.max_iterations, iters_per_epoch
+        )
+
     model = model.to(device)
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
@@ -189,7 +198,7 @@ def trainer_3d(args, model, snapshot_path):
     # --- Losses ---
     from models.Losses import GeneralizedDiceLoss
     ce_loss = CrossEntropyLoss()
-    gdl_loss = GeneralizedDiceLoss(softmax=True)  # ✅ generalized dice
+    gdl_loss = GeneralizedDiceLoss(softmax=True)
 
     # --- Optimizer & Scheduler ---
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
@@ -197,7 +206,6 @@ def trainer_3d(args, model, snapshot_path):
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
-
 
     # Resume training if checkpoint exists
     model, optimizer, scaler, start_epoch, iter_num = load_checkpoint(
