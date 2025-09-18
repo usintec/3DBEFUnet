@@ -1,6 +1,70 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
+
+class GeneralizedDiceLoss(nn.Module):
+    """
+    Generalized Dice Loss (GDL) for multi-class segmentation.
+    Handles class imbalance by weighting inversely proportional
+    to squared class volume (Sudre et al., 2017).
+    """
+
+    def __init__(self, softmax: bool = True, ignore_index: int = None, eps: float = 1e-6):
+        """
+        Args:
+            softmax (bool): Whether to apply softmax to logits.
+            ignore_index (int): Class index to ignore in loss calculation.
+            eps (float): Smoothing term for numerical stability.
+        """
+        super(GeneralizedDiceLoss, self).__init__()
+        self.softmax = softmax
+        self.ignore_index = ignore_index
+        self.eps = eps
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            inputs: [B, C, H, W, D] raw logits or probabilities
+            targets: [B, H, W, D] ground-truth segmentation
+        Returns:
+            loss (scalar tensor)
+        """
+        # Apply softmax to get class probabilities
+        if self.softmax:
+            inputs = F.softmax(inputs, dim=1)
+
+        num_classes = inputs.shape[1]
+
+        # One-hot encode targets
+        targets_onehot = F.one_hot(targets.long(), num_classes=num_classes)  # [B, H, W, D, C]
+        targets_onehot = targets_onehot.permute(0, 4, 1, 2, 3).float()       # [B, C, H, W, D]
+
+        # Mask ignore_index voxels
+        if self.ignore_index is not None:
+            mask = targets != self.ignore_index
+            mask = mask.unsqueeze(1)  # [B, 1, H, W, D]
+            inputs = inputs * mask
+            targets_onehot = targets_onehot * mask
+
+        # Flatten spatial dims: [B, C, -1]
+        inputs = inputs.contiguous().view(inputs.shape[0], num_classes, -1)
+        targets_onehot = targets_onehot.contiguous().view(targets.shape[0], num_classes, -1)
+
+        # Compute per-class volume
+        w = 1.0 / (torch.pow(torch.sum(targets_onehot, dim=2), 2) + self.eps)  # [B, C]
+
+        # Intersection and union
+        intersect = torch.sum(inputs * targets_onehot, dim=2)  # [B, C]
+        denominator = torch.sum(inputs + targets_onehot, dim=2)  # [B, C]
+
+        # Generalized Dice Score
+        numerator = 2 * torch.sum(w * intersect, dim=1)
+        denom = torch.sum(w * denominator, dim=1) + self.eps
+        dice_score = numerator / denom
+
+        # Loss = 1 - mean Dice
+        return 1.0 - dice_score.mean()
 
 class ClassWiseDiscriminativeLoss(nn.Module):
     def __init__(self, delta_var=0.5, delta_dist=1.5,
