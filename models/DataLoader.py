@@ -12,8 +12,8 @@ from sklearn.model_selection import train_test_split
 def zscore_normalize(img):
     mean, std = np.mean(img), np.std(img)
     if std < 1e-6:
-        return np.zeros_like(img, dtype=np.float32)
-    return ((img - mean) / std).astype(np.float32)
+        return np.zeros_like(img)
+    return (img - mean) / std
 
 def resize_volume(img, target_shape=(128,128,128)):
     factors = (target_shape[0]/img.shape[0],
@@ -22,12 +22,13 @@ def resize_volume(img, target_shape=(128,128,128)):
     return ndimage.zoom(img, factors, order=1).astype(np.float32)
 
 # =========================
-# Crop or Pad to Target Shape & Patch Alignment
+# Patch-Aligned Crop/Pad
 # =========================
-def crop_or_pad(volume, target_shape=(96,96,96), patch_size=4):
-    """Crop or pad a volume to target_shape, aligned to patch_size."""
+def crop_or_pad_patch_aligned(volume, target_shape=(96,96,96), patch_size=4):
+    """Crop or pad a 3D/4D volume and ensure all dims are multiples of patch_size."""
+    # Ensure target_shape divisible by patch_size
     target_shape = [((t + patch_size - 1)//patch_size)*patch_size for t in target_shape]
-    
+
     if volume.ndim == 3:
         result = np.zeros(target_shape, dtype=volume.dtype)
         slices = [slice(0, min(s,t)) for s,t in zip(volume.shape, target_shape)]
@@ -64,40 +65,37 @@ def crop_foreground(modalities, seg, crop_size=(96,96,96)):
     return mod_crop, seg_crop
 
 # =========================
-# Data Augmentation
+# Augmentation
 # =========================
-def augment(modalities, seg, target_shape=(96,96,96), patch_size=4):
+def augment_patch_aligned(modalities, seg, target_shape=(96,96,96), patch_size=4):
+    """Augment modalities + seg and enforce patch-aligned final shape."""
     # Random flip
     if random.random() > 0.5:
         modalities = np.flip(modalities, axis=2).copy()
         seg = np.flip(seg, axis=2).copy()
 
-    # Random rotation
+    # Random rotation (axes 0-1 only)
     if random.random() > 0.5:
         angle = random.uniform(-15,15)
         for i in range(modalities.shape[0]):
             modalities[i] = ndimage.rotate(modalities[i], angle, axes=(0,1), reshape=False, order=1)
         seg = ndimage.rotate(seg, angle, axes=(0,1), reshape=False, order=0)
 
-    # Random intensity scaling
+    # Random intensity / gamma
     if random.random() > 0.5:
-        factor = random.uniform(0.9,1.1)
-        modalities = modalities * factor
-
-    # Random gamma correction (safe)
+        modalities = modalities * random.uniform(0.9, 1.1)
     if random.random() > 0.5:
-        gamma = random.uniform(0.8,1.2)
+        gamma = random.uniform(0.8, 1.2)
         modalities = np.clip(modalities, 0, None)
         modalities = np.power(modalities, gamma)
 
     # Gaussian noise
     if random.random() > 0.5:
-        noise = np.random.normal(0,0.01, modalities.shape)
-        modalities = modalities + noise
+        modalities += np.random.normal(0, 0.01, modalities.shape)
 
-    # Ensure patch-aligned shape
-    modalities = crop_or_pad(modalities, target_shape, patch_size)
-    seg = crop_or_pad(seg, target_shape, patch_size)
+    # Ensure patch-aligned final shape
+    modalities = crop_or_pad_patch_aligned(modalities, target_shape, patch_size)
+    seg = crop_or_pad_patch_aligned(seg, target_shape, patch_size)
 
     return modalities, seg
 
@@ -147,8 +145,13 @@ class BraTSDataset(Dataset):
             # Tumor-aware crop
             modalities, seg = crop_foreground(modalities, seg, self.crop_size)
 
+            # Apply patch-aligned augmentation if transform
             if self.transform:
-                modalities, seg = augment(modalities, seg, self.crop_size, self.patch_size)
+                modalities, seg = augment_patch_aligned(modalities, seg, self.crop_size, self.patch_size)
+            else:
+                # Even for val set, ensure patch-aligned
+                modalities = crop_or_pad_patch_aligned(modalities, self.crop_size, self.patch_size)
+                seg = crop_or_pad_patch_aligned(seg, self.crop_size, self.patch_size)
 
             seg = torch.tensor(seg, dtype=torch.long)
         else:
@@ -186,14 +189,12 @@ def get_all_cases(data_dir):
     print(f"✅ Using {len(valid_cases)}/{len(all_cases)} cases with labels")
     return valid_cases
 
-def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96), crop_size=(96,96,96), patch_size=4, use_weighted_sampler=False):
+def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96), use_weighted_sampler=False, patch_size=4):
     all_cases = get_all_cases(data_dir)
     train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
 
-    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape,
-                                 crop_size=crop_size, patch_size=patch_size)
-    val_dataset = BraTSDataset(val_cases, transform=False, target_shape=target_shape,
-                               crop_size=crop_size, patch_size=patch_size)
+    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape, patch_size=patch_size)
+    val_dataset = BraTSDataset(val_cases, transform=False, target_shape=target_shape, patch_size=patch_size)
 
     if use_weighted_sampler:
         sampler = make_weighted_sampler(train_dataset)
