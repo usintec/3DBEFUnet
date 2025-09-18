@@ -158,6 +158,7 @@ def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
 
     return model, optimizer, scaler, start_epoch, iter_num
 
+from tqdm import tqdm
 
 def trainer_3d(args, model, snapshot_path):
     import datetime, math
@@ -222,36 +223,53 @@ def trainer_3d(args, model, snapshot_path):
 
     for epoch_num in range(start_epoch, max_epoch):
         model.train()
-        for i_batch, sampled_batch in enumerate(train_loader):
-            image_batch = sampled_batch['image'].to(device, non_blocking=True)
-            label_batch = sampled_batch['label'].to(device, non_blocking=True)
+        epoch_loss = 0.0
 
-            try:
-                with torch.amp.autocast("cuda", enabled=True):
-                    seg_logits, _, _ = model(image_batch)
-                    loss_ce = ce_loss(seg_logits, label_batch.long())
-                    loss_gdl = gdl_loss(seg_logits, label_batch)
+        # ✅ Wrap train_loader with tqdm
+        with tqdm(train_loader, desc=f"Epoch [{epoch_num+1}/{max_epoch}]", unit="batch") as pbar:
+            for i_batch, sampled_batch in enumerate(pbar):
+                image_batch = sampled_batch['image'].to(device, non_blocking=True)
+                label_batch = sampled_batch['label'].to(device, non_blocking=True)
 
-                    # ✅ New loss: 0.5 * CE + 0.5 * GDL
-                    loss = 0.5 * loss_ce + 0.5 * loss_gdl
+                try:
+                    with torch.amp.autocast("cuda", enabled=True):
+                        seg_logits, _, _ = model(image_batch)
+                        loss_ce = ce_loss(seg_logits, label_batch.long())
+                        loss_gdl = gdl_loss(seg_logits, label_batch)
 
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                        # ✅ New loss: 0.5 * CE + 0.5 * GDL
+                        loss = 0.5 * loss_ce + 0.5 * loss_gdl
 
-                iter_num += 1
-                writer.add_scalar('info/total_loss', loss.item(), iter_num)
-                writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
-                writer.add_scalar('info/loss_gdl', loss_gdl.item(), iter_num)
+                    optimizer.zero_grad()
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
 
-            except RuntimeError as e:
-                if 'out of memory' in str(e):
-                    logging.warning("OOM at iter %d, skipping", iter_num)
-                    torch.cuda.empty_cache()
-                    continue
-                else:
-                    raise
+                    iter_num += 1
+                    epoch_loss += loss.item()
+
+                    # update progress bar
+                    pbar.set_postfix({
+                        "loss": f"{loss.item():.4f}",
+                        "CE": f"{loss_ce.item():.4f}",
+                        "GDL": f"{loss_gdl.item():.4f}"
+                    })
+
+                    # log to tensorboard
+                    writer.add_scalar('info/total_loss', loss.item(), iter_num)
+                    writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
+                    writer.add_scalar('info/loss_gdl', loss_gdl.item(), iter_num)
+
+                except RuntimeError as e:
+                    if 'out of memory' in str(e):
+                        logging.warning("OOM at iter %d, skipping", iter_num)
+                        torch.cuda.empty_cache()
+                        continue
+                    else:
+                        raise
+
+        avg_epoch_loss = epoch_loss / len(train_loader)
+        logging.info(f"Epoch {epoch_num+1}/{max_epoch} finished, Avg Loss = {avg_epoch_loss:.4f}")
 
         # Step the scheduler once per epoch
         scheduler.step()
@@ -267,8 +285,7 @@ def trainer_3d(args, model, snapshot_path):
             if mean_dice > best_performance:
                 best_performance = mean_dice
                 counter = 0
-                logging.info("New best Dice = %.4f at epoch %d", mean_dice, epoch_num)
-
+                tqdm.write(f"🌟 New best Dice = {mean_dice:.4f} at epoch {epoch_num}")
                 save_checkpoint(
                     {
                         "model_state": model.state_dict(),
@@ -282,10 +299,10 @@ def trainer_3d(args, model, snapshot_path):
                 )
             else:
                 counter += 1
-                logging.info("No improvement. Patience counter = %d/%d", counter, patience)
+                tqdm.write(f"No improvement. Patience counter = {counter}/{patience}")
 
             if counter >= patience:
-                logging.info("⏹ Early stopping triggered at epoch %d", epoch_num)
+                tqdm.write(f"⏹ Early stopping triggered at epoch {epoch_num}")
                 break
             model.train()
 
