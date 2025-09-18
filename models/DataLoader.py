@@ -183,19 +183,47 @@ class BraTSDataset(Dataset):
 
 
 
+
+# =========================
+# Dataset Split (with filtering)
+# =========================
+def get_all_cases(data_dir):
+    """Return all valid cases (with both 4 modalities + seg)."""
+    all_cases = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
+    valid_cases = []
+
+    for case in all_cases:
+        seg_files = glob.glob(os.path.join(case, "*seg.nii*"))
+        if len(seg_files) == 0:
+            print(f"⚠️ Skipping {case} (no segmentation file)")
+            continue
+
+        # check all 4 modalities exist
+        has_modalities = all(
+            len(glob.glob(os.path.join(case, f"*{m}.nii*"))) == 1
+            for m in ["t1", "t1ce", "t2", "flair"]
+        )
+        if not has_modalities:
+            print(f"⚠️ Skipping {case} (missing modality)")
+            continue
+
+        valid_cases.append(case)
+
+    print(f"✅ Using {len(valid_cases)}/{len(all_cases)} cases with labels")
+    return valid_cases
+
 # =========================
 # Dataset Split
 # =========================
 def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
-    all_cases = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
-    print(f"Found total {len(all_cases)} cases.")
+    all_cases = get_all_cases(data_dir)
 
     # 80/20 split
     train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
 
     # Create datasets
-    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape)   # with augmentation
-    val_dataset   = BraTSDataset(val_cases, transform=False, target_shape=target_shape)   # no augmentation
+    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape)
+    val_dataset   = BraTSDataset(val_cases, transform=False, target_shape=target_shape)
 
     # Create loaders
     train_loader = DataLoader(
@@ -203,16 +231,15 @@ def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
         batch_size=batch_size,
         shuffle=True,
         num_workers=4,
-        collate_fn=custom_collate   # ✅ use safe collate
-        )
+        pin_memory=True
+    )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,      # often safer to use 1 for validation
+        batch_size=batch_size,  # or 1 for safer validation
         shuffle=False,
         num_workers=4,
-        collate_fn=custom_collate   # ✅ handles None labels
-        )
-
+        pin_memory=True
+    )
 
     return train_loader, val_loader
