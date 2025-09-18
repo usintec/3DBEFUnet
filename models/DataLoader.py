@@ -6,7 +6,14 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.model_selection import train_test_split
-import elasticdeform
+# Try importing elasticdeform, but make it optional
+try:
+    import elasticdeform
+    USE_ELASTICDEFORM = True
+except ImportError:
+    print("⚠️ elasticdeform not available. Skipping elastic deformation.")
+    USE_ELASTICDEFORM = False
+
 
 # =========================
 # Visualization Utilities
@@ -98,10 +105,15 @@ def augment(modalities, seg):
         gamma = random.uniform(0.8, 1.2)
         modalities = np.power(modalities, gamma)
 
-    if random.random() > 0.5:
+    # if random.random() > 0.5:
+    #     [modalities, seg] = elasticdeform.deform_random_grid(
+    #         [modalities, seg], sigma=5, points=3, order=[1, 0]
+    #     )
+    if USE_ELASTICDEFORM and random.random() > 0.5:
         [modalities, seg] = elasticdeform.deform_random_grid(
             [modalities, seg], sigma=5, points=3, order=[1, 0]
         )
+
 
     if random.random() > 0.5:
         noise = np.random.normal(0, 0.01, modalities.shape)
