@@ -1,15 +1,15 @@
+import os, glob, random
 import numpy as np
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-import random
+import nibabel as nib
 import scipy.ndimage as ndimage
-import os, glob, nibabel as nib
-from torch.utils.data import Dataset, DataLoader
+import matplotlib.pyplot as plt
+import torch
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.model_selection import train_test_split
+import elasticdeform
 
 # =========================
-# 4. Visualize MRI slices
+# Visualization Utilities
 # =========================
 def plot_slices(img_data, title="MRI Slices"):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -23,14 +23,6 @@ def plot_slices(img_data, title="MRI Slices"):
     plt.show()
 
 def plot_mri_modalities(modalities, slice_idx=None, modality_names=None):
-    """
-    Plot MRI slices for different modalities.
-
-    Args:
-        modalities (torch.Tensor or np.ndarray): Shape (4, H, W, D)
-        slice_idx (int): Index of the slice along the axial plane (D). If None, uses the middle slice.
-        modality_names (list): List of modality labels, e.g. ["T1", "T1ce", "T2", "FLAIR"]
-    """
     if isinstance(modalities, torch.Tensor):
         modalities = modalities.numpy()
 
@@ -38,8 +30,7 @@ def plot_mri_modalities(modalities, slice_idx=None, modality_names=None):
         raise ValueError(f"Expected 4 modalities, got {modalities.shape[0]}")
 
     if slice_idx is None:
-        slice_idx = modalities.shape[-1] // 2  # middle slice
-
+        slice_idx = modalities.shape[-1] // 2
     if modality_names is None:
         modality_names = ["T1", "T1ce", "T2", "FLAIR"]
 
@@ -54,54 +45,78 @@ def plot_mri_modalities(modalities, slice_idx=None, modality_names=None):
 # =========================
 # Preprocessing Utilities
 # =========================
-def normalize(volume):
-    """Normalize volume to [0,1]."""
-    min_val = np.min(volume)
-    max_val = np.max(volume)
-    if max_val - min_val == 0:
-        return np.zeros(volume.shape)
-    volume = (volume - min_val) / (max_val - min_val)
-    return volume.astype(np.float32)
+def zscore_normalize(img):
+    mean, std = np.mean(img), np.std(img)
+    if std < 1e-6:
+        return np.zeros_like(img)
+    return (img - mean) / std
 
 def resize_volume(img, target_shape=(128, 128, 128)):
-    """Resize 3D volume with scipy ndimage zoom."""
     factors = (
         target_shape[0] / img.shape[0],
         target_shape[1] / img.shape[1],
         target_shape[2] / img.shape[2],
     )
-    img = ndimage.zoom(img, factors, order=1)  # linear interpolation
-    return img
+    return ndimage.zoom(img, factors, order=1)
+
+def crop_foreground(modalities, seg, crop_size=(96, 96, 96)):
+    non_zero = np.argwhere(seg > 0)
+    if len(non_zero) > 0:
+        center = non_zero[np.random.choice(len(non_zero))]
+    else:  # random fallback
+        center = [np.random.randint(crop_size[i]//2, seg.shape[i]-crop_size[i]//2) for i in range(3)]
+
+    slices = []
+    for i in range(3):
+        start = max(0, center[i] - crop_size[i]//2)
+        end = min(seg.shape[i], start + crop_size[i])
+        slices.append(slice(start, end))
+
+    seg_crop = seg[slices[0], slices[1], slices[2]]
+    mod_crop = modalities[:, slices[0], slices[1], slices[2]]
+    return mod_crop, seg_crop
 
 # =========================
 # Data Augmentation
 # =========================
 def augment(modalities, seg):
-    """Random flip, rotation, and noise."""
-    # Random flip
     if random.random() > 0.5:
-        modalities = np.flip(modalities, axis=2).copy()  # flip W axis
-        seg = np.flip(seg, axis=1).copy()
+        modalities = np.flip(modalities, axis=2).copy()
+        seg = np.flip(seg, axis=2).copy()
 
-    # Random rotation (±15° around z-axis)
     if random.random() > 0.5:
         angle = random.uniform(-15, 15)
         for i in range(modalities.shape[0]):
             modalities[i] = ndimage.rotate(modalities[i], angle, axes=(0, 1), reshape=False, order=1)
         seg = ndimage.rotate(seg, angle, axes=(0, 1), reshape=False, order=0)
 
-    # Random Gaussian noise
+    if random.random() > 0.5:
+        factor = random.uniform(0.9, 1.1)
+        modalities = modalities * factor
+
+    if random.random() > 0.5:
+        gamma = random.uniform(0.8, 1.2)
+        modalities = np.power(modalities, gamma)
+
+    if random.random() > 0.5:
+        [modalities, seg] = elasticdeform.deform_random_grid(
+            [modalities, seg], sigma=5, points=3, order=[1, 0]
+        )
+
     if random.random() > 0.5:
         noise = np.random.normal(0, 0.01, modalities.shape)
         modalities = modalities + noise
 
     return modalities, seg
+
+# =========================
+# Collate Function
+# =========================
 def custom_collate(batch):
     images = torch.stack([item["image"] for item in batch], dim=0)
-    labels = [item["label"] for item in batch]  # may include None
+    labels = [item["label"] for item in batch]
     case_names = [item["case_name"] for item in batch]
 
-    # stack labels only if all are not None
     if all(lbl is not None for lbl in labels):
         labels = torch.stack(labels, dim=0)
     else:
@@ -110,136 +125,103 @@ def custom_collate(batch):
     return {"image": images, "label": labels, "case_name": case_names}
 
 # =========================
-# BraTS Dataset Class
+# BraTS Dataset
 # =========================
 class BraTSDataset(Dataset):
-    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128)):
-        """
-        Args:
-            case_dirs (list): List of paths to case folders
-            transform (bool): Whether to apply augmentation
-            target_shape (tuple): Shape to resize volumes
-        """
+    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96)):
         self.case_dirs = case_dirs
         self.transform = transform
         self.target_shape = target_shape
-
+        self.crop_size = crop_size
         print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
 
     def __len__(self):
         return len(self.case_dirs)
-    
+
     def __getitem__(self, idx):
         case_dir = self.case_dirs[idx]
-
-        # Explicitly filter only the 4 modalities
         modality_files = {
-            "t1": glob.glob(os.path.join(case_dir, "*t1.nii*")),
-            "t1ce": glob.glob(os.path.join(case_dir, "*t1ce.nii*")),
-            "t2": glob.glob(os.path.join(case_dir, "*t2.nii*")),
-            "flair": glob.glob(os.path.join(case_dir, "*flair.nii*")),
+            "t1": glob.glob(os.path.join(case_dir, "*t1.nii*"))[0],
+            "t1ce": glob.glob(os.path.join(case_dir, "*t1ce.nii*"))[0],
+            "t2": glob.glob(os.path.join(case_dir, "*t2.nii*"))[0],
+            "flair": glob.glob(os.path.join(case_dir, "*flair.nii*"))[0],
         }
 
-        # Make sure we found exactly one file for each modality
-        for k, v in modality_files.items():
-            #assert len(v) == 1, f"Missing or duplicate {k} modality in {case_dir}"
-            if len(v) != 1:
-                print(f"⚠️ Skipping {case_dir}, problem with {k}: {v}")
-                return self.__getitem__((idx+1) % len(self.case_dirs))  # skip to next
-
-        # Load 4 MRI modalities
         modalities = []
         for key in ["t1", "t1ce", "t2", "flair"]:
-            img = nib.load(modality_files[key][0]).get_fdata()
-            img = normalize(img)
+            img = nib.load(modality_files[key]).get_fdata()
+            img = zscore_normalize(img)
             img = resize_volume(img, self.target_shape)
             modalities.append(img)
-        modalities = np.stack(modalities, axis=0)  # (4, H, W, D)
+        modalities = np.stack(modalities, axis=0)
 
-        # Load segmentation if available
         seg_files = glob.glob(os.path.join(case_dir, "*seg.nii*"))
         if len(seg_files) > 0:
             seg = nib.load(seg_files[0]).get_fdata()
-            seg = resize_volume(seg, self.target_shape)
-
-            # 🔑 Remap BraTS labels: {0,1,2,4} → {0,1,2,3}
-            seg = seg.astype(np.int32)
+            seg = resize_volume(seg, self.target_shape).astype(np.int32)
             seg[seg == 4] = 3
 
+            modalities, seg = crop_foreground(modalities, seg, self.crop_size)
             if self.transform:
                 modalities, seg = augment(modalities, seg)
 
-            seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
+            seg = torch.tensor(seg, dtype=torch.long)
         else:
-            seg = None  # No ground truth in validation
+            seg = None
 
-        modalities = torch.tensor(modalities, dtype=torch.float32)  # (4,H,W,D)
+        modalities = torch.tensor(modalities, dtype=torch.float32)
 
-        return {
-            "image": modalities,
-            "label": seg,
-            "case_name": os.path.basename(case_dir)
-        }
-
-
-
+        return {"image": modalities, "label": seg, "case_name": os.path.basename(case_dir)}
 
 # =========================
-# Dataset Split (with filtering)
+# Weighted Sampler
+# =========================
+def make_weighted_sampler(dataset):
+    weights = []
+    for case in dataset.case_dirs:
+        seg_file = glob.glob(os.path.join(case, "*seg.nii*"))[0]
+        seg = nib.load(seg_file).get_fdata()
+        tumor_fraction = np.mean(seg > 0)
+        weights.append(1.0 / (tumor_fraction + 1e-3))
+    return WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+
+# =========================
+# Dataset Split
 # =========================
 def get_all_cases(data_dir):
-    """Return all valid cases (with both 4 modalities + seg)."""
     all_cases = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
     valid_cases = []
 
     for case in all_cases:
         seg_files = glob.glob(os.path.join(case, "*seg.nii*"))
         if len(seg_files) == 0:
-            print(f"⚠️ Skipping {case} (no segmentation file)")
             continue
-
-        # check all 4 modalities exist
         has_modalities = all(
             len(glob.glob(os.path.join(case, f"*{m}.nii*"))) == 1
             for m in ["t1", "t1ce", "t2", "flair"]
         )
         if not has_modalities:
-            print(f"⚠️ Skipping {case} (missing modality)")
             continue
-
         valid_cases.append(case)
 
-    print(f"✅ Using {len(valid_cases)}/{len(all_cases)} cases with labels")
+    print(f"✅ Using {len(valid_cases)}/{len(all_cases)} cases")
     return valid_cases
 
-# =========================
-# Dataset Split
-# =========================
-def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
+def get_train_val_loaders(data_dir, batch_size=1, target_shape=(96,96,96), use_sampler=False):
     all_cases = get_all_cases(data_dir)
-
-    # 80/20 split
     train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
 
-    # Create datasets
     train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape)
     val_dataset   = BraTSDataset(val_cases, transform=False, target_shape=target_shape)
 
-    # Create loaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True
-    )
+    if use_sampler:
+        sampler = make_weighted_sampler(train_dataset)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler,
+                                  num_workers=4, pin_memory=True, collate_fn=custom_collate)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                  num_workers=4, pin_memory=True, collate_fn=custom_collate)
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,  # or 1 for safer validation
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
-
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
+                            num_workers=4, pin_memory=True, collate_fn=custom_collate)
     return train_loader, val_loader

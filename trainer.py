@@ -218,7 +218,13 @@ def trainer_3d(args, model, snapshot_path):
 
     # --- Optimizer & Scheduler ---
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epochs)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="max",   # because higher Dice is better
+        factor=0.5,   # reduce LR by 50%
+        patience=10,  # wait 10 epochs without improvement
+        min_lr=1e-6
+    )
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
@@ -287,9 +293,6 @@ def trainer_3d(args, model, snapshot_path):
         train_loss_history.append(avg_epoch_loss)
         logging.info(f"Epoch {epoch_num+1}/{max_epoch} finished, Avg Loss = {avg_epoch_loss:.4f}")
 
-        scheduler.step()
-        writer.add_scalar('info/lr', scheduler.get_last_lr()[0], epoch_num)
-
         # 🔑 Validation every eval_interval
         if (epoch_num + 1) % args.eval_interval == 0:
             model.eval()
@@ -299,11 +302,13 @@ def trainer_3d(args, model, snapshot_path):
             for k in val_dice_history.keys():
                 val_dice_history[k].append(metrics[k]["dice"])
 
-            # ✅ Save only if mean_dice beats threshold *and* best_performance
+            # --- Early stopping logic ---
             min_dice_threshold = 0.430985  # 🔧 adjust as needed
+            improved = False
             if mean_dice >= min_dice_threshold and mean_dice > best_performance:
                 best_performance = mean_dice
-                counter = 0
+                counter = 0  # reset only when performance improves
+                improved = True
                 tqdm.write(f"🌟 New best Dice = {mean_dice:.4f} (threshold {min_dice_threshold}) at epoch {epoch_num}")
                 save_checkpoint(
                     {
@@ -316,13 +321,21 @@ def trainer_3d(args, model, snapshot_path):
                     snapshot_path,
                     f"{args.model_name}_best.pth",
                 )
-            else:
+
+            # increment counter regardless of threshold
+            if not improved:
                 counter += 1
-                tqdm.write(f"⚠️ No save: Dice = {mean_dice:.4f}, best = {best_performance:.4f}, threshold = {min_dice_threshold}")
+                tqdm.write(f"⚠️ No improvement: Dice = {mean_dice:.4f}, best = {best_performance:.4f}, "
+                           f"threshold = {min_dice_threshold}, patience counter = {counter}/{patience}")
 
             if counter >= patience:
                 tqdm.write(f"⏹ Early stopping triggered at epoch {epoch_num}")
                 break
+
+            # ✅ Update scheduler AFTER early stopping check
+            scheduler.step(mean_dice)
+            writer.add_scalar('info/lr', optimizer.param_groups[0]['lr'], epoch_num)
+
             model.train()
 
     # --- Plot results ---
