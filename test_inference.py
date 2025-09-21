@@ -131,7 +131,7 @@ if __name__ == "__main__":
     _, test_loader = get_train_val_loaders("/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData", batch_size=1)
 
     # Load model
-    model = BEFUnet3D(num_classes=4).to(DEVICE)
+    model = BEFUnet3D(n_classes=4).to(DEVICE)
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     model.load_state_dict(checkpoint["model_state"])
     print("✅ Loaded trained model.")
