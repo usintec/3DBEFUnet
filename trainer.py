@@ -216,8 +216,8 @@ def trainer_3d(args, model, snapshot_path):
     class_weights = [1.0, 2.0, 1.0, 1.0]
     loss_fn = BalancedLoss(
         num_classes=args.num_classes,
-        ce_weight=0.7,
-        dice_weight=0.3,
+        ce_weight=0.9,
+        dice_weight=0.1,
         class_weights=class_weights
     ).to(device)
 
