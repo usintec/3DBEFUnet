@@ -259,7 +259,7 @@ def trainer_3d(args, model, snapshot_path):
                         seg_logits, _, _ = model(image_batch)
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_gdl = gdl_loss(seg_logits, label_batch)
-                        loss = 0.5 * loss_ce + 0.5 * loss_gdl
+                        loss = 0.6 * loss_ce + 0.4 * loss_gdl
 
                     optimizer.zero_grad()
                     scaler.scale(loss).backward()
