@@ -15,8 +15,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import datetime
 from models.DataLoader import get_train_val_loaders
-# 🔑 Import BalancedLoss
-from Losses import BalancedLoss
 
 @torch.no_grad()
 @torch.no_grad()
@@ -178,12 +176,13 @@ def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
     return model, optimizer, scaler, start_epoch, iter_num
 
 def trainer_3d(args, model, snapshot_path):
-    import math
+    import datetime, math
     date_and_time = datetime.datetime.now()
 
     os.makedirs(os.path.join(snapshot_path, 'test'), exist_ok=True)
     test_save_path = os.path.join(snapshot_path, 'test')
 
+    # Logging
     logging.basicConfig(
         filename=os.path.join(snapshot_path, f"{args.model_name}_{date_and_time:%Y%m%d-%H%M%S}_log.txt"),
         level=logging.INFO,
@@ -199,6 +198,7 @@ def trainer_3d(args, model, snapshot_path):
     batch_size = args.batch_size * args.n_gpu
     train_loader, val_loader = get_train_val_loaders(args.root_path, batch_size=batch_size)
 
+    # 🔑 Adjust max_epochs from max_iterations if provided
     if getattr(args, "max_iterations", None) and args.max_iterations > 0:
         iters_per_epoch = len(train_loader)
         args.max_epochs = math.ceil(args.max_iterations / iters_per_epoch)
@@ -211,24 +211,25 @@ def trainer_3d(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
 
-    # --- Use BalancedLoss ---
-    # Example weights for [BG, ET, TC, WT] → emphasize ET
-    class_weights = [1.0, 2.0, 1.0, 1.0]
-    loss_fn = BalancedLoss(
-        num_classes=args.num_classes,
-        ce_weight=0.8,
-        dice_weight=0.2,
-        class_weights=class_weights
-    ).to(device)
+    # --- Losses ---
+    from models.Losses import GeneralizedDiceLoss
+    ce_loss = CrossEntropyLoss()
+    gdl_loss = GeneralizedDiceLoss(softmax=True)
 
+    # --- Optimizer & Scheduler ---
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
+        optimizer,
+        mode="max",   # because higher Dice is better
+        factor=0.5,   # reduce LR by 50%
+        patience=10,  # wait 10 epochs without improvement
+        min_lr=1e-6
     )
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
 
+    # Resume training if checkpoint exists
     model, optimizer, scaler, start_epoch, iter_num = load_checkpoint(
         model, optimizer, scaler, snapshot_path, device
     )
@@ -240,6 +241,7 @@ def trainer_3d(args, model, snapshot_path):
     patience = getattr(args, "patience", 20)
     counter = 0
 
+    # --- For plotting ---
     train_loss_history = []
     val_dice_history = {"ET": [], "TC": [], "WT": [], "mean": []}
 
@@ -255,7 +257,9 @@ def trainer_3d(args, model, snapshot_path):
                 try:
                     with torch.amp.autocast("cuda", enabled=True):
                         seg_logits, _, _ = model(image_batch)
-                        loss = loss_fn(seg_logits, label_batch)
+                        loss_ce = ce_loss(seg_logits, label_batch.long())
+                        loss_gdl = gdl_loss(seg_logits, label_batch)
+                        loss = 0.8 * loss_ce + 0.2 * loss_gdl
 
                     optimizer.zero_grad()
                     scaler.scale(loss).backward()
@@ -265,8 +269,17 @@ def trainer_3d(args, model, snapshot_path):
                     iter_num += 1
                     epoch_loss += loss.item()
 
-                    pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+                    # update progress bar
+                    pbar.set_postfix({
+                        "loss": f"{loss.item():.4f}",
+                        "CE": f"{loss_ce.item():.4f}",
+                        "GDL": f"{loss_gdl.item():.4f}"
+                    })
+
+                    # log to tensorboard
                     writer.add_scalar('info/total_loss', loss.item(), iter_num)
+                    writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
+                    writer.add_scalar('info/loss_gdl', loss_gdl.item(), iter_num)
 
                 except RuntimeError as e:
                     if 'out of memory' in str(e):
@@ -280,18 +293,21 @@ def trainer_3d(args, model, snapshot_path):
         train_loss_history.append(avg_epoch_loss)
         logging.info(f"Epoch {epoch_num+1}/{max_epoch} finished, Avg Loss = {avg_epoch_loss:.4f}")
 
+        # 🔑 Validation every eval_interval
         if (epoch_num + 1) % args.eval_interval == 0:
             model.eval()
             mean_dice, mean_hd95, metrics = inference_3d(model, val_loader, args, test_save_path=test_save_path)
 
+            # store per-class Dice
             for k in val_dice_history.keys():
                 val_dice_history[k].append(metrics[k]["dice"])
 
-            min_dice_threshold = 0.4716
+            # --- Early stopping logic ---
+            min_dice_threshold = 0.4704  # 🔧 adjust as needed
             improved = False
             if mean_dice >= min_dice_threshold and mean_dice >= best_performance:
                 best_performance = mean_dice
-                counter = 0
+                counter = 0  # reset only when performance improves
                 improved = True
                 tqdm.write(f"🌟 New best Dice = {mean_dice:.4f} (threshold {min_dice_threshold}) at epoch {epoch_num}")
                 save_checkpoint(
@@ -306,6 +322,7 @@ def trainer_3d(args, model, snapshot_path):
                     f"{args.model_name}_best.pth",
                 )
 
+            # increment counter regardless of threshold
             if not improved:
                 counter += 1
                 tqdm.write(f"⚠️ No improvement: Dice = {mean_dice:.4f}, best = {best_performance:.4f}, "
@@ -315,11 +332,13 @@ def trainer_3d(args, model, snapshot_path):
                 tqdm.write(f"⏹ Early stopping triggered at epoch {epoch_num}")
                 break
 
+            # ✅ Update scheduler AFTER early stopping check
             scheduler.step(mean_dice)
             writer.add_scalar('info/lr', optimizer.param_groups[0]['lr'], epoch_num)
 
             model.train()
 
+    # --- Plot results ---
     plot_result(train_loss_history, val_dice_history, snapshot_path, args)
     writer.close()
     return "Training Finished!"

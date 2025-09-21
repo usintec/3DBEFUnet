@@ -2,6 +2,60 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class BalancedLoss(nn.Module):
+    def __init__(self, ce_weight=0.8, dice_weight=0.2, class_weights=None, num_classes=4):
+        """
+        Balanced loss = weighted CE + weighted Generalized Dice Loss
+
+        Args:
+            ce_weight (float): weight for cross entropy part
+            dice_weight (float): weight for dice part
+            class_weights (list or None): per-class weights [WT, TC, ET, Background?] 
+                                          If None, all classes get equal weight.
+            num_classes (int): number of segmentation classes (BraTS = 4 incl. background)
+        """
+        super(BalancedLoss, self).__init__()
+        self.ce_weight = ce_weight
+        self.dice_weight = dice_weight
+
+        if class_weights is None:
+            self.class_weights = torch.ones(num_classes)
+        else:
+            self.class_weights = torch.tensor(class_weights, dtype=torch.float32)
+
+        self.num_classes = num_classes
+
+    def forward(self, logits, targets):
+        """
+        Args:
+            logits (torch.Tensor): model outputs [B, C, H, W, D]
+            targets (torch.Tensor): ground truth [B, H, W, D] with class indices
+        """
+        device = logits.device
+        self.class_weights = self.class_weights.to(device)
+
+        # CrossEntropyLoss with class weights
+        ce_loss = F.cross_entropy(logits, targets, weight=self.class_weights)
+
+        # One-hot encode targets
+        targets_onehot = F.one_hot(targets, num_classes=self.num_classes)  # [B,H,W,D,C]
+        targets_onehot = targets_onehot.permute(0, 4, 1, 2, 3).float()     # [B,C,H,W,D]
+
+        probs = torch.softmax(logits, dim=1)  # [B,C,H,W,D]
+
+        # Generalized Dice Loss
+        dims = (0, 2, 3, 4)  # reduce over batch + spatial dims
+        intersection = torch.sum(probs * targets_onehot, dims)
+        denominator = torch.sum(probs + targets_onehot, dims)
+
+        gdl_loss = 1.0 - (2. * intersection + 1e-5) / (denominator + 1e-5)
+
+        # Apply class weights to dice
+        gdl_loss = torch.sum(self.class_weights * gdl_loss) / torch.sum(self.class_weights)
+
+        # Combine
+        loss = self.ce_weight * ce_loss + self.dice_weight * gdl_loss
+        return loss
 
 class GeneralizedDiceLoss(nn.Module):
     """
