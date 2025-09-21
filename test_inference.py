@@ -128,7 +128,7 @@ def evaluate_all(model, testloader, num_classes=4):
 # -------------------------------
 if __name__ == "__main__":
     # Load data (reuse val_loader as test set)
-    _, test_loader = get_train_val_loaders(root_path="/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData", batch_size=1)
+    _, test_loader = get_train_val_loaders("/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData", batch_size=1)
 
     # Load model
     model = BEFUnet3D(num_classes=4).to(DEVICE)
