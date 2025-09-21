@@ -238,7 +238,7 @@ def trainer_3d(args, model, snapshot_path):
     logging.info("%d iterations per epoch", len(train_loader))
 
     best_performance = 0.0
-    patience = getattr(args, "patience", 10)
+    patience = getattr(args, "patience", 20)
     counter = 0
 
     # --- For plotting ---
@@ -259,7 +259,7 @@ def trainer_3d(args, model, snapshot_path):
                         seg_logits, _, _ = model(image_batch)
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_gdl = gdl_loss(seg_logits, label_batch)
-                        loss = 0.6 * loss_ce + 0.4 * loss_gdl
+                        loss = 0.8 * loss_ce + 0.2 * loss_gdl
 
                     optimizer.zero_grad()
                     scaler.scale(loss).backward()
@@ -303,7 +303,7 @@ def trainer_3d(args, model, snapshot_path):
                 val_dice_history[k].append(metrics[k]["dice"])
 
             # --- Early stopping logic ---
-            min_dice_threshold = 0.4479  # 🔧 adjust as needed
+            min_dice_threshold = 0.4704  # 🔧 adjust as needed
             improved = False
             if mean_dice >= min_dice_threshold and mean_dice >= best_performance:
                 best_performance = mean_dice
