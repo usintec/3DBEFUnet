@@ -17,7 +17,7 @@ MODEL_PATH = "/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_best.pth"
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output_dir', type=str,
-                    default='./results', help='root dir for output log')
+                    default='/content/drive/MyDrive/outputs/BEFUnet3D', help='root dir for output log')
 parser.add_argument('--model_name', type=str,
                     default='BEFUnet3D')
 parser.add_argument('--root_path', type=str,
