@@ -303,7 +303,7 @@ def trainer_3d(args, model, snapshot_path):
                 val_dice_history[k].append(metrics[k]["dice"])
 
             # --- Early stopping logic ---
-            min_dice_threshold = 0.4441  # 🔧 adjust as needed
+            min_dice_threshold = 0.4479  # 🔧 adjust as needed
             improved = False
             if mean_dice >= min_dice_threshold and mean_dice >= best_performance:
                 best_performance = mean_dice
