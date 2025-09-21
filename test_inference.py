@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import configs.BEFUnet_Config as configs
 import argparse
+import random
 
 from models.BEFUnet import BEFUnet3D  # ⚠️ adjust if your model file has a different name
 from models.DataLoader import get_train_val_loaders
@@ -40,27 +41,31 @@ def pixel_accuracy(pred, label):
 # 🔹 Visualize single test case
 # -------------------------------
 @torch.no_grad()
-def test_single_case(model, testloader):
+def test_single_case(model, testloader, output_dir="./results"):
     model.eval()
-    batch = next(iter(testloader))  # take first case
-    image = batch["image"].to(DEVICE)       # (1, C, D, H, W)
-    label = batch["label"].to(DEVICE)       # (1, D, H, W)
-    case_name = batch["case_name"][0]
 
+    # Pick a random index
+    idx = random.randint(0, len(testloader.dataset) - 1)
+    batch = testloader.dataset[idx]  # dataset returns dict
+    image = batch["image"].unsqueeze(0).to(DEVICE)   # add batch dim → (1, C, D, H, W)
+    label = batch["label"].unsqueeze(0).to(DEVICE)   # (1, D, H, W)
+    case_name = batch["case_name"]
+
+    # Run inference
     seg_logits, _, _ = model(image)
     pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
 
-    # Convert to numpy for metrics
+    # Convert to numpy
     prediction_np = pred.squeeze(0).cpu().numpy()
     label_np = label.squeeze(0).cpu().numpy()
 
-    # Pick central slice for visualization
-    mid_slice = prediction_np.shape[0] // 2
-    img_slice = image[0, 0, mid_slice].cpu().numpy()
-    pred_slice = prediction_np[mid_slice]
-    label_slice = label_np[mid_slice]
+    # Random slice instead of fixed middle
+    slice_idx = random.randint(0, prediction_np.shape[0] - 1)
+    img_slice = image[0, 0, slice_idx].cpu().numpy()
+    pred_slice = prediction_np[slice_idx]
+    label_slice = label_np[slice_idx]
 
-    # Plot input, GT, and prediction
+    # Plot input, GT, prediction
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 3, 1)
     plt.imshow(img_slice, cmap="gray")
@@ -77,14 +82,15 @@ def test_single_case(model, testloader):
     plt.title("Prediction")
     plt.axis("off")
 
-    plt.suptitle(f"Case: {case_name}")
-    # plt.show()
+    plt.suptitle(f"Case: {case_name}, Slice {slice_idx}")
     plt.tight_layout()
-    out_file = os.path.join(args.output_dir, f"{case_name}_result.png")
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_file = os.path.join(output_dir, f"{case_name}_slice{slice_idx}_result.png")
     plt.savefig(out_file, dpi=150)
     print(f"🖼 Saved visualization to {out_file}")
 
-
+    # Accuracy
     acc = pixel_accuracy(prediction_np, label_np)
     print(f"✅ Single-case Accuracy for {case_name}: {acc:.4f}")
     return acc
