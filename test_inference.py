@@ -231,4 +231,4 @@ if __name__ == "__main__":
     test_single_case(model, test_loader, args.output_dir)
 
     # Run full evaluation
-    # evaluate_all(model, test_loader, num_classes=4)
+    evaluate_all(model, test_loader, num_classes=4)
