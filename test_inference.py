@@ -41,7 +41,7 @@ def pixel_accuracy(pred, label):
 # 🔹 Visualize single test case
 # -------------------------------
 @torch.no_grad()
-def test_single_case(model, testloader, output_dir="./results"):
+def test_single_case(model, testloader, output_dir):
     model.eval()
 
     # Pick a random index
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     print("✅ Loaded trained model.")
 
     # Run single-case test
-    test_single_case(model, test_loader)
+    test_single_case(model, test_loader, args.output_dir)
 
     # Run full evaluation
     # evaluate_all(model, test_loader, num_classes=4)
