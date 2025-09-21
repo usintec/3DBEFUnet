@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import configs.BEFUnet_Config as configs
+import argparse
 
 from models.BEFUnet import BEFUnet3D  # ⚠️ adjust if your model file has a different name
 from models.DataLoader import get_train_val_loaders
@@ -14,7 +15,18 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 MODEL_PATH = "/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_best.pth"
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--output_dir', type=str,
+                    default='./results', help='root dir for output log')
+parser.add_argument('--model_name', type=str,
+                    default='BEFUnet3D')
+parser.add_argument('--root_path', type=str,
+                    # default='C:/Users/Olatayo/Documents/Machine-Learning/3DBEFUnet Model/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
+                    default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData', help='root dir for training data')
+args = parser.parse_args()
 
+args.output_dir = os.path.join(args.output_dir, args.model_name)
+os.makedirs(args.output_dir, exist_ok=True)
 # -------------------------------
 # 🔹 Utility for single-case accuracy
 # -------------------------------
@@ -67,9 +79,10 @@ def test_single_case(model, testloader):
 
     plt.suptitle(f"Case: {case_name}")
     # plt.show()
-    out_path = f"{case_name}_result.png"
-    plt.savefig(out_path, dpi=150)
-    print(f"🖼 Saved visualization to {out_path}")
+    plt.tight_layout()
+    out_file = os.path.join(args.output_dir, f"{case_name}_result.png")
+    plt.savefig(out_file, dpi=150)
+    print(f"🖼 Saved visualization to {out_file}")
 
 
     acc = pixel_accuracy(prediction_np, label_np)
