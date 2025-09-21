@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import configs.BEFUnet_Config as configs
 
 from models.BEFUnet import BEFUnet3D  # ⚠️ adjust if your model file has a different name
 from models.DataLoader import get_train_val_loaders
@@ -127,11 +128,16 @@ def evaluate_all(model, testloader, num_classes=4):
 # 🔹 Main
 # -------------------------------
 if __name__ == "__main__":
+    CONFIGS = {
+        'BEFUnet3D': configs.get_BEFUnet_configs(),  # keep configs call if unchanged
+    }
     # Load data (reuse val_loader as test set)
     _, test_loader = get_train_val_loaders("/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData", batch_size=1)
 
     # Load model
-    model = BEFUnet3D(n_classes=4).to(DEVICE)
+    model = BEFUnet3D(
+        config=CONFIGS['BEFUnet3D'],
+        n_classes=4).to(DEVICE)
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     model.load_state_dict(checkpoint["model_state"])
     print("✅ Loaded trained model.")
