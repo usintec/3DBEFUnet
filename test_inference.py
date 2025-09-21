@@ -66,7 +66,11 @@ def test_single_case(model, testloader):
     plt.axis("off")
 
     plt.suptitle(f"Case: {case_name}")
-    plt.show()
+    # plt.show()
+    out_path = f"{case_name}_result.png"
+    plt.savefig(out_path, dpi=150)
+    print(f"🖼 Saved visualization to {out_path}")
+
 
     acc = pixel_accuracy(prediction_np, label_np)
     print(f"✅ Single-case Accuracy for {case_name}: {acc:.4f}")
@@ -146,4 +150,4 @@ if __name__ == "__main__":
     test_single_case(model, test_loader)
 
     # Run full evaluation
-    evaluate_all(model, test_loader, num_classes=4)
+    # evaluate_all(model, test_loader, num_classes=4)
