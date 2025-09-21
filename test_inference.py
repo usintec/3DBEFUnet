@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from models.BEFUnet3D import BEFUnet3D   # ⚠️ adjust if your model file has a different name
+from models.BEFUnet import BEFUnet3D  # ⚠️ adjust if your model file has a different name
 from models.DataLoader import get_train_val_loaders
 from utils import calculate_metric_percase
 
