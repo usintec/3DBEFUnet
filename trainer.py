@@ -16,7 +16,7 @@ import pandas as pd
 import datetime
 from models.DataLoader import get_train_val_loaders
 # 🔑 Import BalancedLoss
-from Losses import BalancedLoss
+from models.Losses import BalancedLoss
 
 @torch.no_grad()
 @torch.no_grad()
