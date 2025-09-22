@@ -34,7 +34,7 @@ parser.add_argument('--deterministic', type=int, default=1,
                     help='whether use deterministic training')
 parser.add_argument('--base_lr', type=float, default=0.001,
                     help='segmentation network learning rate')
-parser.add_argument('--num_workers', type=int, default=2,
+parser.add_argument('--num_workers', type=int, default=1,
                     help='number of workers')
 parser.add_argument('--img_size', type=int, default=96,
                     help='input patch size (H, W)')
