@@ -26,7 +26,6 @@ def resize_volume(img, target_shape=(128,128,128)):
 # =========================
 def crop_or_pad_patch_aligned(volume, target_shape=(96,96,96), patch_size=4):
     """Crop or pad a 3D/4D volume and ensure all dims are multiples of patch_size."""
-    # Ensure target_shape divisible by patch_size
     target_shape = [((t + patch_size - 1)//patch_size)*patch_size for t in target_shape]
 
     if volume.ndim == 3:
@@ -52,6 +51,7 @@ def crop_foreground(modalities, seg, crop_size=(96,96,96)):
     if len(non_zero) > 0:
         center = non_zero[np.random.choice(len(non_zero))]
     else:
+        # fallback: pick random location
         center = [np.random.randint(crop_size[i]//2, seg.shape[i]-crop_size[i]//2) for i in range(3)]
 
     slices = []
@@ -103,12 +103,13 @@ def augment_patch_aligned(modalities, seg, target_shape=(96,96,96), patch_size=4
 # BraTS Dataset
 # =========================
 class BraTSDataset(Dataset):
-    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96), patch_size=4):
+    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96), patch_size=4, skip_empty=True):
         self.case_dirs = case_dirs
         self.transform = transform
         self.target_shape = target_shape
         self.crop_size = crop_size
         self.patch_size = patch_size
+        self.skip_empty = skip_empty
         print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
 
     def __len__(self):
@@ -142,6 +143,10 @@ class BraTSDataset(Dataset):
             seg = seg.astype(np.int32)
             seg[seg == 4] = 3
 
+            # Skip empty masks if enabled
+            if self.skip_empty and np.sum(seg) == 0:
+                return self.__getitem__((idx+1) % len(self.case_dirs))
+
             # Tumor-aware crop
             modalities, seg = crop_foreground(modalities, seg, self.crop_size)
 
@@ -149,7 +154,6 @@ class BraTSDataset(Dataset):
             if self.transform:
                 modalities, seg = augment_patch_aligned(modalities, seg, self.crop_size, self.patch_size)
             else:
-                # Even for val set, ensure patch-aligned
                 modalities = crop_or_pad_patch_aligned(modalities, self.crop_size, self.patch_size)
                 seg = crop_or_pad_patch_aligned(seg, self.crop_size, self.patch_size)
 
@@ -184,6 +188,10 @@ def get_all_cases(data_dir):
             continue
         has_modalities = all(len(glob.glob(os.path.join(case,f"*{m}.nii*"))) == 1 for m in ["t1","t1ce","t2","flair"])
         if not has_modalities:
+            continue
+        # Skip cases with empty segmentation
+        seg = nib.load(seg_files[0]).get_fdata()
+        if np.sum(seg) == 0:
             continue
         valid_cases.append(case)
     print(f"✅ Using {len(valid_cases)}/{len(all_cases)} cases with labels")
