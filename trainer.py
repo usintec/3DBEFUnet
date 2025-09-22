@@ -17,6 +17,8 @@ import datetime
 from models.DataLoader import get_train_val_loaders
 # 🔑 Import BalancedLoss
 from models.Losses import BalancedLoss
+from torch.optim.lr_scheduler import LambdaLR
+
 
 @torch.no_grad()
 @torch.no_grad()
@@ -177,6 +179,20 @@ def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
 
     return model, optimizer, scaler, start_epoch, iter_num
 
+# --- Scheduler helper ---
+def lr_lambda(epoch, warmup_epochs=5, max_epochs=300, base_lr=0.001, min_lr=1e-6, power=0.9):
+    """Linear warmup + polynomial decay"""
+    if epoch < warmup_epochs:
+        # Warmup: scale from 1e-4 → base_lr over warmup_epochs
+        warmup_start = 1e-4
+        return (warmup_start + (base_lr - warmup_start) * (epoch + 1) / warmup_epochs) / base_lr
+    else:
+        # PolyLR decay after warmup
+        decay_epoch = epoch - warmup_epochs
+        decay_max = max_epochs - warmup_epochs
+        poly_factor = (1 - decay_epoch / decay_max) ** power
+        return max(min_lr / base_lr, poly_factor)
+
 def trainer_3d(args, model, snapshot_path):
     import math
     date_and_time = datetime.datetime.now()
@@ -216,15 +232,22 @@ def trainer_3d(args, model, snapshot_path):
     class_weights = [1.0, 2.0, 1.0, 1.0]
     loss_fn = BalancedLoss(
         num_classes=args.num_classes,
-        ce_weight=0.5,
-        dice_weight=0.5,
+        ce_weight=0.9,
+        dice_weight=0.1,
         class_weights=class_weights
     ).to(device)
 
-    optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
+    # optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
+    # )
+    optimizer = optim.SGD(
+        model.parameters(),
+        lr=args.base_lr,
+        momentum=0.9,
+        weight_decay=0.0001,
     )
+    scheduler = LambdaLR(optimizer, lr_lambda=lambda epoch: lr_lambda(epoch))
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
