@@ -232,8 +232,8 @@ def trainer_3d(args, model, snapshot_path):
     class_weights = [1.0, 2.0, 1.0, 1.0]
     loss_fn = BalancedLoss(
         num_classes=args.num_classes,
-        ce_weight=0.9,
-        dice_weight=0.1,
+        ce_weight=0.99,
+        dice_weight=0.01,
         class_weights=class_weights
     ).to(device)
 
@@ -310,7 +310,7 @@ def trainer_3d(args, model, snapshot_path):
             for k in val_dice_history.keys():
                 val_dice_history[k].append(metrics[k]["dice"])
 
-            min_dice_threshold = 0.4814
+            min_dice_threshold = 0.4874
             improved = False
             if mean_dice >= min_dice_threshold and mean_dice >= best_performance:
                 best_performance = mean_dice
