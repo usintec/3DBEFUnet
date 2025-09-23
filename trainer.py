@@ -16,7 +16,7 @@ import pandas as pd
 import datetime
 from models.DataLoader import get_train_val_loaders
 # 🔑 Import BalancedLoss
-from models.Losses import BalancedLoss
+from models.Losses import BalancedLoss, DiceFocalLoss
 from torch.optim.lr_scheduler import LambdaLR
 
 
@@ -236,6 +236,8 @@ def trainer_3d(args, model, snapshot_path):
         dice_weight=0.01,
         class_weights=class_weights
     ).to(device)
+    loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5, num_classes=4).to(device)
+
 
     # optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
