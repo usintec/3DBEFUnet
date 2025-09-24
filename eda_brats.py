@@ -73,6 +73,7 @@ def analyze_dataset(cases, name="Dataset", output_dir="./outputs"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, required=True,
+                        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
                         help='path to BraTS data root')
     parser.add_argument('--output_dir', type=str,
                         default='/content/drive/MyDrive/outputs/RawDataset',
