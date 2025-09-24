@@ -94,6 +94,28 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
 
     return performance, mean_hd95
 
+def plot_result2(dice, h, snapshot_path, args):
+    data = {'mean_dice': dice, 'mean_hd95': h}
+    df = pd.DataFrame(data)
+    resolution_value = 300
+
+    # Dice curve
+    ax = df['mean_dice'].plot(title='Mean Dice')
+    fig = ax.get_figure()
+    fn = f'{args.model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}_dice.png'
+    fig.savefig(os.path.join(snapshot_path, fn), format="png", dpi=resolution_value)
+    plt.close(fig)
+
+    # HD95 curve
+    ax = df['mean_hd95'].plot(title='Mean HD95')
+    fig = ax.get_figure()
+    fn = f'{args.model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}_hd95.png'
+    fig.savefig(os.path.join(snapshot_path, fn), format="png", dpi=resolution_value)
+    plt.close(fig)
+
+    # CSV
+    fn = f'{args.model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}_results.csv'
+    df.to_csv(os.path.join(snapshot_path, fn), sep='\t', index=False)
 
 def plot_result(dice, h, snapshot_path, args):
     data = {'mean_dice': dice, 'mean_hd95': h}

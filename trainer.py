@@ -1,35 +1,30 @@
 import logging
 import os
-import random
 import sys
 import numpy as np
+import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tensorboardX import SummaryWriter
-from torch.nn.modules.loss import CrossEntropyLoss
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-from utils import DiceLoss  # uses reduction over all voxels; works for 3D too
 import matplotlib.pyplot as plt
 import pandas as pd
 import datetime
+
+from tqdm import tqdm
+from tensorboardX import SummaryWriter
+from utils import DiceLoss, calculate_metric_percase  # uses reduction over all voxels; works for 3D too
 from models.DataLoader import get_train_val_loaders
-# 🔑 Import BalancedLoss
 from models.Losses import BalancedLoss, DiceFocalLoss
 from torch.optim.lr_scheduler import LambdaLR
 
-
-@torch.no_grad()
-@torch.no_grad()
 @torch.no_grad()
 def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     """
     3D inference with per-class metrics (Dice, HD95).
     Returns:
-        performance (float): mean Dice across classes
-        mean_hd95 (float): mean HD95 across classes
-        metrics (dict): per-class Dice & HD95, plus mean
+        performance (float): mean Dice across tumor classes (macro-avg)
+        mean_hd95 (float): mean HD95 across tumor classes (macro-avg)
+        metrics (dict): per-class Dice & HD95, plus macro averages
     """
     model.eval()
     metric_sum = None  # accumulate per-class metrics (dice, hd95), shape: (C-1, 2)
@@ -42,20 +37,24 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         label = sampled_batch["label"].cuda(non_blocking=True)   # (1, D, H, W)
         case_name = sampled_batch['case_name'][0]
 
-        seg_logits, embeddings, _ = model(image)
-        if apply_msc:
-            seg_logits = msc(embeddings, seg_logits)
+        with torch.no_grad():
+            seg_logits, embeddings, _ = model(image)
+            if apply_msc:
+                seg_logits = msc(embeddings, seg_logits)
 
         pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
 
-        from utils import calculate_metric_percase
         prediction_np = pred.squeeze(0).cpu().numpy()
         label_np = label.squeeze(0).cpu().numpy()
 
+        # Compute per-class metrics
         metric_i = []
-        for c in range(1, args.num_classes):
-            metric_i.append(calculate_metric_percase((prediction_np == c).astype(np.uint8),
-                                                     (label_np == c).astype(np.uint8)))
+        for c in range(1, args.num_classes):  # skip background
+            dice_c, hd95_c = calculate_metric_percase(
+                (prediction_np == c).astype(np.uint8),
+                (label_np == c).astype(np.uint8)
+            )
+            metric_i.append((dice_c, hd95_c))
         metric_i = np.array(metric_i)  # shape (C-1, 2)
 
         if metric_sum is None:
@@ -63,27 +62,39 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         else:
             metric_sum += metric_i
 
-        logging.info(' idx %d case %s mean_dice %f mean_hd95 %f',
-                     i_batch, case_name, np.mean(metric_i, axis=0)[0], np.mean(metric_i, axis=0)[1])
+        logging.info(
+            f"Case {case_name}: mean Dice = {np.mean(metric_i[:,0]):.4f}, "
+            f"mean HD95 = {np.mean(metric_i[:,1]):.4f}"
+        )
 
-    # Average over dataset
+    # Average over dataset (macro average across cases)
     metric_mean = metric_sum / len(testloader.dataset)
 
-    class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {i: f"class{i}" for i in range(1, args.num_classes)}
+    class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
+        i: f"class{i}" for i in range(1, args.num_classes)
+    }
+
     per_class_metrics = {}
     for i in range(1, args.num_classes):
         dice_i, hd95_i = metric_mean[i-1]
-        per_class_metrics[class_names[i]] = {"dice": float(dice_i), "hd95": float(hd95_i)}
-        logging.info('Mean %s: Dice = %.4f, HD95 = %.4f', class_names[i], dice_i, hd95_i)
+        per_class_metrics[class_names[i]] = {
+            "dice": float(dice_i),
+            "hd95": float(hd95_i)
+        }
+        logging.info(
+            f"Mean {class_names[i]}: Dice = {dice_i:.4f}, HD95 = {hd95_i:.4f}"
+        )
 
-    performance = float(np.mean(metric_mean, axis=0)[0])
-    mean_hd95 = float(np.mean(metric_mean, axis=0)[1])
+    # Macro averages
+    performance = float(np.mean(metric_mean[:, 0]))
+    mean_hd95 = float(np.mean(metric_mean[:, 1]))
     per_class_metrics["mean"] = {"dice": performance, "hd95": mean_hd95}
 
-    logging.info('Testing performance (best-val model): mean_dice: %.4f  mean_hd95: %.4f',
-                 performance, mean_hd95)
+    logging.info(
+        f"Testing performance (best-val model): mean_dice = {performance:.4f}, "
+        f"mean_hd95 = {mean_hd95:.4f}"
+    )
 
-    # 🔑 Keep backward compatibility
     return performance, mean_hd95, per_class_metrics
 
 def plot_result(train_loss_history, val_dice_history, snapshot_path, args):
@@ -116,34 +127,10 @@ def plot_result(train_loss_history, val_dice_history, snapshot_path, args):
     plt.close()
     print(f"✅ Training curves saved at {out_file}")
 
-def plot_result2(dice, h, snapshot_path, args):
-    data = {'mean_dice': dice, 'mean_hd95': h}
-    df = pd.DataFrame(data)
-    resolution_value = 300
-
-    # Dice curve
-    ax = df['mean_dice'].plot(title='Mean Dice')
-    fig = ax.get_figure()
-    fn = f'{args.model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}_dice.png'
-    fig.savefig(os.path.join(snapshot_path, fn), format="png", dpi=resolution_value)
-    plt.close(fig)
-
-    # HD95 curve
-    ax = df['mean_hd95'].plot(title='Mean HD95')
-    fig = ax.get_figure()
-    fn = f'{args.model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}_hd95.png'
-    fig.savefig(os.path.join(snapshot_path, fn), format="png", dpi=resolution_value)
-    plt.close(fig)
-
-    # CSV
-    fn = f'{args.model_name}_{datetime.datetime.now():%Y%m%d-%H%M%S}_results.csv'
-    df.to_csv(os.path.join(snapshot_path, fn), sep='\t', index=False)
-
 def save_checkpoint(state, snapshot_path, filename):
     os.makedirs(snapshot_path, exist_ok=True)
     filepath = os.path.join(snapshot_path, filename)
     torch.save(state, filepath)
-
 
 def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
     # List all .pth files in snapshot path
@@ -194,7 +181,6 @@ def lr_lambda(epoch, warmup_epochs=5, max_epochs=300, base_lr=0.001, min_lr=1e-6
         return max(min_lr / base_lr, poly_factor)
 
 def trainer_3d(args, model, snapshot_path):
-    import math
     date_and_time = datetime.datetime.now()
 
     os.makedirs(os.path.join(snapshot_path, 'test'), exist_ok=True)
@@ -239,17 +225,17 @@ def trainer_3d(args, model, snapshot_path):
     loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5, num_classes=4).to(device)
 
 
-    # optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    #     optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
-    # )
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=args.base_lr,
-        momentum=0.9,
-        weight_decay=0.0001,
+    optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
     )
-    scheduler = LambdaLR(optimizer, lr_lambda=lambda epoch: lr_lambda(epoch))
+    # optimizer = optim.SGD(
+    #     model.parameters(),
+    #     lr=args.base_lr,
+    #     momentum=0.9,
+    #     weight_decay=0.0001,
+    # )
+    # scheduler = LambdaLR(optimizer, lr_lambda=lambda epoch: lr_lambda(epoch))
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)

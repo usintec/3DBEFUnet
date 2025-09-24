@@ -622,16 +622,22 @@ class DiceLoss(nn.Module):
 
 
 def calculate_metric_percase(pred, gt):
-    pred[pred > 0] = 1
-    gt[gt > 0] = 1
-    if pred.sum() > 0 and gt.sum()>0:
+    """
+    Compute Dice and HD95 per case for a binary prediction vs GT.
+    Handles empty masks correctly for BraTS-style evaluation.
+    """
+    pred = (pred > 0).astype(np.uint8)
+    gt = (gt > 0).astype(np.uint8)
+
+    if gt.sum() > 0 and pred.sum() > 0:   # both non-empty
         dice = metric.binary.dc(pred, gt)
         hd95 = metric.binary.hd95(pred, gt)
         return dice, hd95
-    elif pred.sum() > 0 and gt.sum()==0:
-        return 1, 0
-    else:
-        return 0, 0
+    elif gt.sum() == 0 and pred.sum() == 0:  # both empty (true negative)
+        return 1.0, 0.0
+    else:  # one empty, one non-empty (false positive or false negative)
+        return 0.0, 373.13  # use np.inf if your library supports it
+
 
 
 def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_save_path=None, case=None, z_spacing=1):
