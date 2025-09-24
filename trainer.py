@@ -97,35 +97,86 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
 
     return performance, mean_hd95, per_class_metrics
 
-def plot_result(train_loss_history, val_dice_history, snapshot_path, args):
+def plot_result(train_loss_history, val_dice_history, val_hd95_history, snapshot_path, args):
     """
-    Plots training loss and validation Dice (ET, TC, WT) vs epochs.
+    Plots:
+      1. Training loss vs epochs (separate file)
+      2. Per-class Dice (ET, TC, WT, mean) vs epochs (separate file)
+      3. Per-class HD95 (ET, TC, WT, mean) vs epochs (separate file)
+      4. Combined figure with all three (loss, Dice, HD95)
     """
     epochs = range(1, len(train_loss_history) + 1)
 
     # --- Plot training loss ---
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
+    plt.figure(figsize=(6, 5))
     plt.plot(epochs, train_loss_history, 'b-o', label='Training Loss')
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
     plt.title("Training Loss vs Epochs")
     plt.legend()
+    out_file = os.path.join(snapshot_path, f"{args.model_name}_loss_curve.png")
+    plt.savefig(out_file, dpi=150)
+    plt.close()
+    print(f"✅ Loss curve saved at {out_file}")
 
     # --- Plot per-class Dice ---
-    plt.subplot(1, 2, 2)
+    plt.figure(figsize=(6, 5))
     for k, v in val_dice_history.items():
         plt.plot(epochs[:len(v)], v, '-o', label=f"Dice {k}")
     plt.xlabel("Epochs")
     plt.ylabel("Dice Score")
     plt.title("Validation Dice vs Epochs")
     plt.legend()
+    out_file = os.path.join(snapshot_path, f"{args.model_name}_dice_curve.png")
+    plt.savefig(out_file, dpi=150)
+    plt.close()
+    print(f"✅ Dice curve saved at {out_file}")
+
+    # --- Plot per-class HD95 ---
+    plt.figure(figsize=(6, 5))
+    for k, v in val_hd95_history.items():
+        plt.plot(epochs[:len(v)], v, '-o', label=f"HD95 {k}")
+    plt.xlabel("Epochs")
+    plt.ylabel("HD95 (mm)")
+    plt.title("Validation HD95 vs Epochs")
+    plt.legend()
+    out_file = os.path.join(snapshot_path, f"{args.model_name}_hd95_curve.png")
+    plt.savefig(out_file, dpi=150)
+    plt.close()
+    print(f"✅ HD95 curve saved at {out_file}")
+
+    # --- Combined Dashboard ---
+    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+
+    # Subplot 1: Loss
+    axs[0].plot(epochs, train_loss_history, 'b-o', label="Training Loss")
+    axs[0].set_title("Training Loss")
+    axs[0].set_xlabel("Epochs")
+    axs[0].set_ylabel("Loss")
+    axs[0].legend()
+
+    # Subplot 2: Dice
+    for k, v in val_dice_history.items():
+        axs[1].plot(epochs[:len(v)], v, '-o', label=f"Dice {k}")
+    axs[1].set_title("Validation Dice")
+    axs[1].set_xlabel("Epochs")
+    axs[1].set_ylabel("Dice Score")
+    axs[1].legend()
+
+    # Subplot 3: HD95
+    for k, v in val_hd95_history.items():
+        axs[2].plot(epochs[:len(v)], v, '-o', label=f"HD95 {k}")
+    axs[2].set_title("Validation HD95")
+    axs[2].set_xlabel("Epochs")
+    axs[2].set_ylabel("HD95 (mm)")
+    axs[2].legend()
 
     plt.tight_layout()
-    out_file = os.path.join(snapshot_path, f"{args.model_name}_training_curves.png")
-    plt.savefig(out_file)
+    out_file = os.path.join(snapshot_path, f"{args.model_name}_training_dashboard.png")
+    plt.savefig(out_file, dpi=150)
     plt.close()
-    print(f"✅ Training curves saved at {out_file}")
+    print(f"✅ Combined dashboard saved at {out_file}")
+
 
 def save_checkpoint(state, snapshot_path, filename):
     os.makedirs(snapshot_path, exist_ok=True)
@@ -213,29 +264,13 @@ def trainer_3d(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
 
-    # --- Use BalancedLoss ---
-    # Example weights for [BG, ET, TC, WT] → emphasize ET
-    class_weights = [1.0, 2.0, 1.0, 1.0]
-    loss_fn = BalancedLoss(
-        num_classes=args.num_classes,
-        ce_weight=0.99,
-        dice_weight=0.01,
-        class_weights=class_weights
-    ).to(device)
+    # --- Use DiceFocalLoss ---
     loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5, num_classes=4).to(device)
-
 
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
     )
-    # optimizer = optim.SGD(
-    #     model.parameters(),
-    #     lr=args.base_lr,
-    #     momentum=0.9,
-    #     weight_decay=0.0001,
-    # )
-    # scheduler = LambdaLR(optimizer, lr_lambda=lambda epoch: lr_lambda(epoch))
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
@@ -253,6 +288,7 @@ def trainer_3d(args, model, snapshot_path):
 
     train_loss_history = []
     val_dice_history = {"ET": [], "TC": [], "WT": [], "mean": []}
+    val_hd95_history = {"ET": [], "TC": [], "WT": [], "mean": []}  # NEW
 
     for epoch_num in range(start_epoch, max_epoch):
         model.train()
@@ -295,9 +331,14 @@ def trainer_3d(args, model, snapshot_path):
             model.eval()
             mean_dice, mean_hd95, metrics = inference_3d(model, val_loader, args, test_save_path=test_save_path)
 
-            for k in val_dice_history.keys():
+            # --- Save Dice & HD95 history ---
+            for k in ["ET", "TC", "WT"]:
                 val_dice_history[k].append(metrics[k]["dice"])
+                val_hd95_history[k].append(metrics[k]["hd95"])
+            val_dice_history["mean"].append(mean_dice)
+            val_hd95_history["mean"].append(mean_hd95)
 
+            # --- Check improvement ---
             min_dice_threshold = 0.4874
             improved = False
             if mean_dice >= min_dice_threshold and mean_dice >= best_performance:
@@ -331,6 +372,7 @@ def trainer_3d(args, model, snapshot_path):
 
             model.train()
 
-    plot_result(train_loss_history, val_dice_history, snapshot_path, args)
+    # ✅ Updated call
+    plot_result(train_loss_history, val_dice_history, val_hd95_history, snapshot_path, args)
     writer.close()
     return "Training Finished!"
