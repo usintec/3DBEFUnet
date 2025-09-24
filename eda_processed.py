@@ -73,7 +73,8 @@ def analyze_processed_dataset(dataset, name="Processed Dataset", output_dir="./o
 # ===================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, required=True,
+    parser.add_argument('--data_dir', type=str,
+                        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
                         help='path to BraTS data root')
     parser.add_argument('--output_dir', type=str,
                         default='/content/drive/MyDrive/outputs/EdaProcessedDataset',
