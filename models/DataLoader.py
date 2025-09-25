@@ -68,27 +68,35 @@ def crop_foreground(modalities, seg, crop_size=(96,96,96), tumor_ratio=0.7):
     """
     Crop subvolume around tumor (with probability tumor_ratio)
     or random context patch otherwise.
+    Handles small volumes safely.
     """
+    shape = seg.shape
+
     if np.random.rand() < tumor_ratio and np.any(seg > 0):
         # Tumor-centered crop
         non_zero = np.argwhere(seg > 0)
         center = non_zero[np.random.choice(len(non_zero))]
+        CropLogger.tumor_crops += 1
     else:
-        # Random context crop
-        center = [
-            np.random.randint(crop_size[i]//2, seg.shape[i]-crop_size[i]//2)
-            for i in range(3)
-        ]
+        # Random crop, clamp safe range
+        center = []
+        for i in range(3):
+            low = crop_size[i] // 2
+            high = max(low + 1, shape[i] - crop_size[i] // 2)
+            center.append(np.random.randint(low, high))
+        CropLogger.random_crops += 1
 
     slices = []
     for i in range(3):
-        start = max(0, center[i] - crop_size[i]//2)
-        end = min(seg.shape[i], start + crop_size[i])
+        start = max(0, center[i] - crop_size[i] // 2)
+        end = min(shape[i], start + crop_size[i])
         slices.append(slice(start, end))
 
     seg_crop = seg[slices[0], slices[1], slices[2]]
     mod_crop = modalities[:, slices[0], slices[1], slices[2]]
+
     return mod_crop, seg_crop
+
 
 # =========================
 # Augmentation
