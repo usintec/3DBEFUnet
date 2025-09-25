@@ -64,37 +64,44 @@ def crop_foreground_backup(modalities, seg, crop_size=(96,96,96)):
     mod_crop = modalities[:, slices[0], slices[1], slices[2]]
     return mod_crop, seg_crop
 
-def crop_foreground(modalities, seg, crop_size=(96,96,96), tumor_ratio=0.7):
+import numpy as np
+
+def crop_foreground(modalities, seg, crop_size=(96,96,96), tumor_ratio=0.7): 
     """
     Crop subvolume around tumor (with probability tumor_ratio)
     or random context patch otherwise.
-    Handles small volumes safely.
+    Ensures valid crop regions even if image size < crop size.
     """
     shape = seg.shape
+
+    # Ensure crop_size does not exceed image size
+    crop_size = tuple(min(crop_size[i], shape[i]) for i in range(3))
 
     if np.random.rand() < tumor_ratio and np.any(seg > 0):
         # Tumor-centered crop
         non_zero = np.argwhere(seg > 0)
         center = non_zero[np.random.choice(len(non_zero))]
-        CropLogger.tumor_crops += 1
     else:
-        # Random crop, clamp safe range
+        # Random context crop, safe bounds
         center = []
         for i in range(3):
             low = crop_size[i] // 2
             high = max(low + 1, shape[i] - crop_size[i] // 2)
             center.append(np.random.randint(low, high))
-        CropLogger.random_crops += 1
-
+    
+    # Build slices safely
     slices = []
     for i in range(3):
         start = max(0, center[i] - crop_size[i] // 2)
         end = min(shape[i], start + crop_size[i])
+
+        # Adjust start if crop is smaller than expected
+        if end - start < crop_size[i]:
+            start = max(0, end - crop_size[i])
         slices.append(slice(start, end))
 
     seg_crop = seg[slices[0], slices[1], slices[2]]
     mod_crop = modalities[:, slices[0], slices[1], slices[2]]
-
     return mod_crop, seg_crop
 
 
