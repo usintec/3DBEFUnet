@@ -177,6 +177,19 @@ def plot_result(train_loss_history, val_dice_history, val_hd95_history, snapshot
     plt.close()
     print(f"✅ Combined dashboard saved at {out_file}")
 
+def save_pidinet3d(pidinet, save_path, filename, epoch=None):
+    """
+    Save PiDiNet3D weights only.
+    """
+    state_dict = pidinet.state_dict()
+    checkpoint = {
+        "epoch": epoch,
+        "state_dict": state_dict,
+    }
+    os.makedirs(save_path, exist_ok=True)
+    filepath = os.path.join(save_path, filename)
+    torch.save(checkpoint, filepath)
+    print(f"✅ Saved PiDiNet3D checkpoint to {save_path}")
 
 def save_checkpoint(state, snapshot_path, filename):
     os.makedirs(snapshot_path, exist_ok=True)
@@ -265,9 +278,7 @@ def trainer_3d(args, model, snapshot_path):
         model = nn.DataParallel(model)
 
     # --- Use DiceFocalLoss ---
-    # alpha = [0.1, 0.3, 0.3, 0.3]
-    # class_weights = [1.0, 2.0, 2.0, 3.0]
-    loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5, num_classes=4).to(device)
+    loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5,class_weights = [1.0, 2.0, 2.0, 3.0], alpha = [0.1, 0.3, 0.3, 0.3], num_classes=4).to(device)
 
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -359,6 +370,7 @@ def trainer_3d(args, model, snapshot_path):
                     snapshot_path,
                     f"{args.model_name}_best.pth",
                 )
+                save_pidinet3d(model.pidinet, snapshot_path, f"{args.model_name}_pidinet_best.pth")
 
             if not improved:
                 counter += 1
