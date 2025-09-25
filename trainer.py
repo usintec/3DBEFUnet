@@ -265,6 +265,8 @@ def trainer_3d(args, model, snapshot_path):
         model = nn.DataParallel(model)
 
     # --- Use DiceFocalLoss ---
+    # alpha = [0.1, 0.3, 0.3, 0.3]
+    # class_weights = [1.0, 2.0, 2.0, 3.0]
     loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5, num_classes=4).to(device)
 
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)

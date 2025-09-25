@@ -45,7 +45,7 @@ def crop_or_pad_patch_aligned(volume, target_shape=(96,96,96), patch_size=4):
 # =========================
 # Tumor-aware Cropping
 # =========================
-def crop_foreground(modalities, seg, crop_size=(96,96,96)):
+def crop_foreground_backup(modalities, seg, crop_size=(96,96,96)):
     """Crop subvolume around tumor or random if no tumor exists."""
     non_zero = np.argwhere(seg > 0)
     if len(non_zero) > 0:
@@ -59,6 +59,32 @@ def crop_foreground(modalities, seg, crop_size=(96,96,96)):
         start = max(0, center[i]-crop_size[i]//2)
         end = min(seg.shape[i], start+crop_size[i])
         slices.append(slice(start,end))
+
+    seg_crop = seg[slices[0], slices[1], slices[2]]
+    mod_crop = modalities[:, slices[0], slices[1], slices[2]]
+    return mod_crop, seg_crop
+
+def crop_foreground(modalities, seg, crop_size=(96,96,96), tumor_ratio=0.7):
+    """
+    Crop subvolume around tumor (with probability tumor_ratio)
+    or random context patch otherwise.
+    """
+    if np.random.rand() < tumor_ratio and np.any(seg > 0):
+        # Tumor-centered crop
+        non_zero = np.argwhere(seg > 0)
+        center = non_zero[np.random.choice(len(non_zero))]
+    else:
+        # Random context crop
+        center = [
+            np.random.randint(crop_size[i]//2, seg.shape[i]-crop_size[i]//2)
+            for i in range(3)
+        ]
+
+    slices = []
+    for i in range(3):
+        start = max(0, center[i] - crop_size[i]//2)
+        end = min(seg.shape[i], start + crop_size[i])
+        slices.append(slice(start, end))
 
     seg_crop = seg[slices[0], slices[1], slices[2]]
     mod_crop = modalities[:, slices[0], slices[1], slices[2]]

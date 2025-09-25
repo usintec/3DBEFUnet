@@ -12,18 +12,7 @@ import torch.nn.functional as F
 
 class DiceFocalLoss(nn.Module):
     def __init__(self, dice_weight=0.5, focal_weight=0.5, class_weights=None, num_classes=4, gamma=2.0, alpha=0.25):
-        """
-        Dice + Focal Loss for multi-class segmentation
-
-        Args:
-            dice_weight (float): weight for dice part
-            focal_weight (float): weight for focal part
-            class_weights (list or None): per-class weights [WT, TC, ET, BG] or None for uniform
-            num_classes (int): number of segmentation classes (BraTS = 4 incl. background)
-            gamma (float): focusing parameter for focal loss
-            alpha (float or list): balance factor for focal loss
-        """
-        super(DiceFocalLoss, self).__init__()
+        super().__init__()
         self.dice_weight = dice_weight
         self.focal_weight = focal_weight
         self.num_classes = num_classes
@@ -42,38 +31,25 @@ class DiceFocalLoss(nn.Module):
         self.register_buffer("alpha", alpha)
 
     def forward(self, logits, targets):
-        """
-        Args:
-            logits (torch.Tensor): model outputs [B, C, H, W, D]
-            targets (torch.Tensor): ground truth [B, H, W, D] with class indices
-        """
-        # One-hot encode targets
         targets_onehot = F.one_hot(targets, num_classes=self.num_classes)  # [B,H,W,D,C]
         targets_onehot = targets_onehot.permute(0, 4, 1, 2, 3).float()     # [B,C,H,W,D]
 
-        probs = torch.softmax(logits, dim=1)  # [B,C,H,W,D]
+        probs = torch.softmax(logits, dim=1)
 
-        # -----------------------
-        # Dice Loss
-        # -----------------------
+        # Dice loss
         dims = (0, 2, 3, 4)
         intersection = torch.sum(probs * targets_onehot, dims)
         denominator = torch.sum(probs + targets_onehot, dims)
-        dice_loss = 1.0 - (2. * intersection + 1e-5) / (denominator + 1e-5)
+        dice_loss = 1 - (2. * intersection + 1e-6) / (denominator + 1e-6)
         dice_loss = torch.sum(self.class_weights * dice_loss) / torch.sum(self.class_weights)
 
-        # -----------------------
-        # Focal Loss
-        # -----------------------
-        ce_loss = F.cross_entropy(logits, targets, weight=self.class_weights, reduction='none')  # [B,H,W,D]
-        pt = torch.exp(-ce_loss)  # pt = prob of true class
-        focal_loss = (self.alpha[targets] * (1 - pt) ** self.gamma * ce_loss).mean()
+        # Focal loss
+        ce_loss = F.cross_entropy(logits, targets, weight=self.class_weights, reduction='none')
+        pt = torch.exp(-ce_loss)
+        alpha_factor = self.alpha.gather(0, targets.view(-1)).view_as(targets)
+        focal_loss = (alpha_factor * (1 - pt) ** self.gamma * ce_loss).mean()
 
-        # -----------------------
-        # Combine
-        # -----------------------
-        loss = self.dice_weight * dice_loss + self.focal_weight * focal_loss
-        return loss
+        return self.dice_weight * dice_loss + self.focal_weight * focal_loss
 
 class BalancedLoss(nn.Module):
     def __init__(self, ce_weight=0.8, dice_weight=0.2, class_weights=None, num_classes=4):
