@@ -64,7 +64,7 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
 
         logging.info(
             f"Case {case_name}: mean Dice = {np.mean(metric_i[:,0]):.4f}, "
-            f"mean HD95 = {np.mean(metric_i[:,1]):.4f}"
+            f"mean HD95 = {np.nanmean(metric_i[:,1]):.4f}"
         )
 
     # Average over dataset (macro average across cases)

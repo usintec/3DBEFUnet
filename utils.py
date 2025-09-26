@@ -623,8 +623,10 @@ class DiceLoss(nn.Module):
 
 def calculate_metric_percase(pred, gt):
     """
-    Compute Dice and HD95 per case for a binary prediction vs GT.
-    Handles empty masks correctly for BraTS-style evaluation.
+    Compute Dice and HD95 per case for binary segmentation.
+    - Both non-empty: standard Dice + HD95
+    - Both empty: Dice=1.0, HD95=0.0
+    - One empty & one non-empty: Dice=0.0, HD95=np.nan (so you can ignore when averaging)
     """
     pred = (pred > 0).astype(np.uint8)
     gt = (gt > 0).astype(np.uint8)
@@ -633,12 +635,12 @@ def calculate_metric_percase(pred, gt):
         dice = metric.binary.dc(pred, gt)
         hd95 = metric.binary.hd95(pred, gt)
         return dice, hd95
-    elif gt.sum() == 0 and pred.sum() == 0:  # both empty (true negative)
+
+    elif gt.sum() == 0 and pred.sum() == 0:  # both empty (perfect)
         return 1.0, 0.0
-    else:  # one empty, one non-empty (false positive or false negative)
-        return 0.0, 373.13  # use np.inf if your library supports it
 
-
+    else:  # one empty, one non-empty
+        return 0.0, np.nan  # skip HD95 when averaging
 
 def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_save_path=None, case=None, z_spacing=1):
     image, label = image.squeeze(0).cpu().detach().numpy(), label.squeeze(0).cpu().detach().numpy()
