@@ -18,16 +18,27 @@ from models.Losses import BalancedLoss, DiceFocalLoss
 from torch.optim.lr_scheduler import LambdaLR
 
 @torch.no_grad()
+def calculate_confusion_stats(pred, gt):
+    """
+    Compute TP, FP, TN, FN for binary masks.
+    pred, gt: numpy arrays (0/1)
+    """
+    tp = np.logical_and(pred == 1, gt == 1).sum()
+    tn = np.logical_and(pred == 0, gt == 0).sum()
+    fp = np.logical_and(pred == 1, gt == 0).sum()
+    fn = np.logical_and(pred == 0, gt == 1).sum()
+    return tp, fp, tn, fn
+
+def safe_div(n, d):
+    return n / d if d > 0 else 0.0
+
 def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     """
-    3D inference with per-class metrics (Dice, HD95).
-    Returns:
-        performance (float): mean Dice across tumor classes (macro-avg)
-        mean_hd95 (float): mean HD95 across tumor classes (macro-avg)
-        metrics (dict): per-class Dice & HD95, plus macro averages
+    3D inference with extended metrics: Dice, HD95, Sensitivity, Specificity,
+    Precision, Recall, F1 per class + macro averages.
     """
     model.eval()
-    metric_sum = None  # accumulate per-class metrics (dice, hd95), shape: (C-1, 2)
+    metric_sum = None  # accumulate per-class (dice, hd95, sens, spec, prec, rec, f1), shape: (C-1, 7)
 
     from models.Clustering import MeanShiftClustering
     msc = MeanShiftClustering(bandwidth=0.5)
@@ -50,12 +61,24 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         # Compute per-class metrics
         metric_i = []
         for c in range(1, args.num_classes):  # skip background
-            dice_c, hd95_c = calculate_metric_percase(
-                (prediction_np == c).astype(np.uint8),
-                (label_np == c).astype(np.uint8)
-            )
-            metric_i.append((dice_c, hd95_c))
-        metric_i = np.array(metric_i)  # shape (C-1, 2)
+            pred_c = (prediction_np == c).astype(np.uint8)
+            gt_c = (label_np == c).astype(np.uint8)
+
+            # Dice + HD95
+            dice_c, hd95_c = calculate_metric_percase(pred_c, gt_c)
+
+            # Confusion stats
+            tp, fp, tn, fn = calculate_confusion_stats(pred_c, gt_c)
+
+            sens = safe_div(tp, tp + fn)       # Sensitivity = Recall
+            spec = safe_div(tn, tn + fp)       # Specificity
+            prec = safe_div(tp, tp + fp)       # Precision
+            rec  = sens                        # Recall (same as Sensitivity)
+            f1   = safe_div(2 * prec * rec, prec + rec)
+
+            metric_i.append((dice_c, hd95_c, sens, spec, prec, rec, f1))
+
+        metric_i = np.array(metric_i)  # shape (C-1, 7)
 
         if metric_sum is None:
             metric_sum = metric_i
@@ -64,7 +87,9 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
 
         logging.info(
             f"Case {case_name}: mean Dice = {np.mean(metric_i[:,0]):.4f}, "
-            f"mean HD95 = {np.nanmean(metric_i[:,1]):.4f}"
+            f"mean HD95 = {np.nanmean(metric_i[:,1]):.4f}, "
+            f"mean Sens = {np.mean(metric_i[:,2]):.4f}, "
+            f"mean Spec = {np.mean(metric_i[:,3]):.4f}"
         )
 
     # Average over dataset (macro average across cases)
@@ -76,23 +101,44 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
 
     per_class_metrics = {}
     for i in range(1, args.num_classes):
-        dice_i, hd95_i = metric_mean[i-1]
+        dice_i, hd95_i, sens_i, spec_i, prec_i, rec_i, f1_i = metric_mean[i-1]
         per_class_metrics[class_names[i]] = {
             "dice": float(dice_i),
-            "hd95": float(hd95_i)
+            "hd95": float(hd95_i),
+            "sensitivity": float(sens_i),
+            "specificity": float(spec_i),
+            "precision": float(prec_i),
+            "recall": float(rec_i),
+            "f1": float(f1_i)
         }
         logging.info(
-            f"Mean {class_names[i]}: Dice = {dice_i:.4f}, HD95 = {hd95_i:.4f}"
+            f"Mean {class_names[i]}: Dice = {dice_i:.4f}, HD95 = {hd95_i:.4f}, "
+            f"Sens = {sens_i:.4f}, Spec = {spec_i:.4f}, Prec = {prec_i:.4f}, F1 = {f1_i:.4f}"
         )
 
     # Macro averages
-    performance = float(np.mean(metric_mean[:, 0]))
-    mean_hd95 = float(np.mean(metric_mean[:, 1]))
-    per_class_metrics["mean"] = {"dice": performance, "hd95": mean_hd95}
+    performance = float(np.mean(metric_mean[:, 0]))   # mean Dice
+    mean_hd95   = float(np.mean(metric_mean[:, 1]))
+    mean_sens   = float(np.mean(metric_mean[:, 2]))
+    mean_spec   = float(np.mean(metric_mean[:, 3]))
+    mean_prec   = float(np.mean(metric_mean[:, 4]))
+    mean_rec    = float(np.mean(metric_mean[:, 5]))
+    mean_f1     = float(np.mean(metric_mean[:, 6]))
+
+    per_class_metrics["mean"] = {
+        "dice": performance,
+        "hd95": mean_hd95,
+        "sensitivity": mean_sens,
+        "specificity": mean_spec,
+        "precision": mean_prec,
+        "recall": mean_rec,
+        "f1": mean_f1
+    }
 
     logging.info(
         f"Testing performance (best-val model): mean_dice = {performance:.4f}, "
-        f"mean_hd95 = {mean_hd95:.4f}"
+        f"mean_hd95 = {mean_hd95:.4f}, mean_sens = {mean_sens:.4f}, "
+        f"mean_spec = {mean_spec:.4f}, mean_prec = {mean_prec:.4f}, mean_f1 = {mean_f1:.4f}"
     )
 
     return performance, mean_hd95, per_class_metrics
