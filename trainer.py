@@ -515,6 +515,10 @@ def trainer_3d(args, model, snapshot_path):
         train_loss_history.append(avg_epoch_loss)
         logging.info(f"Epoch {epoch_num+1}/{max_epoch} finished, Avg Loss = {avg_epoch_loss:.4f}")
 
+                # ✅ Plot every 5 epochs
+        if (epoch_num + 1) % 5 == 0:
+            plot_result(train_loss_history, val_dice_history, val_hd95_history, snapshot_path, args)
+            
         if (epoch_num + 1) % args.eval_interval == 0:
             model.eval()
             # mean_dice, mean_hd95, metrics = inference_3d(model, val_loader, args, test_save_path=test_save_path)
