@@ -347,35 +347,47 @@ def save_checkpoint(state, snapshot_path, filename):
     torch.save(state, filepath)
 
 def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
-    # List all .pth files in snapshot path
+    """
+    Load latest checkpoint if available. Otherwise return unmodified model/optimizer/scaler.
+    Returns: model, optimizer, scaler, start_epoch, iter_num
+    """
+    if not os.path.exists(snapshot_path):
+        print(f"⚠️ Snapshot path {snapshot_path} does not exist. Starting from scratch.")
+        return model, optimizer, scaler, 0, 0
+
+    # List all .pth files in snapshot path (except *_pidinet_best.pth)
     checkpoints = sorted(
-        [f for f in os.listdir(snapshot_path) if f.endswith(".pth")],
+        [f for f in os.listdir(snapshot_path)
+         if f.endswith(".pth") and not f.endswith("_pidinet_best.pth")],
         key=lambda x: os.path.getmtime(os.path.join(snapshot_path, x)),
     )
 
+    checkpoint = None
+    latest_ckpt = None
+
     if checkpoints:
-        # Resume from the most recent checkpoint
         latest_ckpt = os.path.join(snapshot_path, checkpoints[-1])
         print(f"🔄 Resuming from checkpoint: {latest_ckpt}")
         checkpoint = torch.load(latest_ckpt, map_location=device)
-
     else:
-        # Fallback: try loading best model
         best_ckpt = os.path.join(snapshot_path, "BEFUnet3D_best.pth")
         if os.path.exists(best_ckpt):
-            print(f"✨ No checkpoints found, loading best model: {best_ckpt}")
+            print(f"✨ Loading best model only (no optimizer/scaler state): {best_ckpt}")
             checkpoint = torch.load(best_ckpt, map_location=device)
         else:
-            print("⚠️ No checkpoints or best model found. Starting from scratch.")
+            print("⚠️ No checkpoints found. Starting from scratch.")
             return model, optimizer, scaler, 0, 0
 
     # Restore model state
     model.load_state_dict(checkpoint["model_state"])
-    optimizer.load_state_dict(checkpoint["optimizer_state"])
+
+    # If it's a training checkpoint, restore optimizer/scaler/epoch
+    if "optimizer_state" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
     if "scaler_state" in checkpoint and checkpoint["scaler_state"] is not None:
         scaler.load_state_dict(checkpoint["scaler_state"])
 
-    start_epoch = checkpoint.get("epoch", 0) + 1
+    start_epoch = checkpoint.get("epoch", -1) + 1
     iter_num = checkpoint.get("iter_num", 0)
 
     return model, optimizer, scaler, start_epoch, iter_num
@@ -442,9 +454,14 @@ def trainer_3d(args, model, snapshot_path):
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
 
-    model, optimizer, scaler, start_epoch, iter_num = load_checkpoint(
+    # Load checkpoint (resume / finetune / scratch)
+    model, optimizer, scaler, start_epoch, iter_num, load_mode = load_checkpoint(
         model, optimizer, scaler, snapshot_path, device
     )
+
+    if load_mode == "finetune":
+        # Reset counters for a fresh training run
+        start_epoch, iter_num = 0, 0
 
     max_epoch = args.max_epochs
     logging.info("%d iterations per epoch", len(train_loader))
