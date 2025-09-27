@@ -435,8 +435,8 @@ def trainer_3d(args, model, snapshot_path):
     #     optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
     # )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optimizer, T_max=args.max_epochs, eta_min=1e-6
-)
+        optimizer, T_max=args.max_epochs, eta_min=1e-6
+    )
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
@@ -535,7 +535,8 @@ def trainer_3d(args, model, snapshot_path):
                 tqdm.write(f"⏹ Early stopping triggered at epoch {epoch_num}")
                 break
 
-            scheduler.step(mean_dice)
+            # scheduler.step(mean_dice)
+            scheduler.step()
             writer.add_scalar('info/lr', optimizer.param_groups[0]['lr'], epoch_num)
 
             model.train()
