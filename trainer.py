@@ -110,9 +110,10 @@ def inference_3d_full(model, testloader, args, patch_size=(96,96,96), stride=(48
         else:
             metric_sum += metric_i
 
+        hd95_val = np.nanmean(metric_i[:,1]) if not np.all(np.isnan(metric_i[:,1])) else 0.0
         logging.info(
             f"Case {case_name}: mean Dice = {np.mean(metric_i[:,0]):.4f}, "
-            f"mean HD95 = {np.nanmean(metric_i[:,1]):.4f}"
+            f"mean HD95 = {hd95_val:.4f}"
         )
 
     # Average across cases
@@ -535,11 +536,11 @@ def trainer_3d(args, model, snapshot_path):
                 tqdm.write(f"⏹ Early stopping triggered at epoch {epoch_num}")
                 break
 
-            # scheduler.step(mean_dice)
-            scheduler.step()
-            writer.add_scalar('info/lr', optimizer.param_groups[0]['lr'], epoch_num)
+        # scheduler.step(mean_dice)
+        scheduler.step()
+        writer.add_scalar('info/lr', optimizer.param_groups[0]['lr'], epoch_num)
 
-            model.train()
+        model.train()
 
     # ✅ Updated call
     plot_result(train_loss_history, val_dice_history, val_hd95_history, snapshot_path, args)
