@@ -528,7 +528,7 @@ def trainer_3d(args, model, snapshot_path):
             val_hd95_history["mean"].append(mean_hd95)
 
             # --- Check improvement ---
-            min_dice_threshold = 0.4874
+            min_dice_threshold = 0.0000
             improved = False
             if mean_dice >= min_dice_threshold and mean_dice >= best_performance:
                 best_performance = mean_dice
