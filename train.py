@@ -24,7 +24,7 @@ parser.add_argument('--list_dir', type=str,
 parser.add_argument('--num_classes', type=int,
                     default=4, help='output channel of network (BraTS: 4 classes)')
 parser.add_argument('--max_iterations', type=int,
-                    default=90000, help='maximum iteration number to train')
+                    default=130000, help='maximum iteration number to train')
 parser.add_argument('--max_epochs', type=int,
                     default=170, help='maximum epoch number to train')
 parser.add_argument('--batch_size', type=int,
