@@ -17,7 +17,109 @@ from models.DataLoader import get_train_val_loaders
 from models.Losses import BalancedLoss, DiceFocalLoss
 from torch.optim.lr_scheduler import LambdaLR
 
+
+def sliding_window_inference(model, volume, patch_size=(96,96,96), stride=(48,48,48), num_classes=4, device="cuda"):
+    """
+    Perform sliding-window inference on a 3D volume.
+    
+    Args:
+        model: trained segmentation model
+        volume: input modalities tensor [C, D, H, W]
+        patch_size: size of sliding window
+        stride: step size between windows
+        num_classes: number of segmentation classes
+        device: device for inference
+    
+    Returns:
+        seg_logits: reconstructed logits [num_classes, D, H, W]
+    """
+    model.eval()
+    C, D, H, W = volume.shape
+    seg_logits = torch.zeros((num_classes, D, H, W), dtype=torch.float32, device=device)
+    norm_map = torch.zeros((1, D, H, W), dtype=torch.float32, device=device)
+
+    # Pad volume if needed
+    pad_d = max(0, patch_size[0] - D % stride[0]) if D < patch_size[0] else 0
+    pad_h = max(0, patch_size[1] - H % stride[1]) if H < patch_size[1] else 0
+    pad_w = max(0, patch_size[2] - W % stride[2]) if W < patch_size[2] else 0
+    volume = F.pad(volume.unsqueeze(0), (0,pad_w,0,pad_h,0,pad_d), mode="constant", value=0).squeeze(0)
+
+    _, Dp, Hp, Wp = volume.shape
+
+    # Slide patches
+    for z in range(0, Dp - patch_size[0] + 1, stride[0]):
+        for y in range(0, Hp - patch_size[1] + 1, stride[1]):
+            for x in range(0, Wp - patch_size[2] + 1, stride[2]):
+                patch = volume[:, z:z+patch_size[0], y:y+patch_size[1], x:x+patch_size[2]]
+                patch = patch.unsqueeze(0).to(device)  # [1,C,D,H,W]
+
+                with torch.no_grad():
+                    logits_patch, _, _ = model(patch)  # [1,num_classes,D,H,W]
+                    logits_patch = logits_patch.squeeze(0)
+
+                seg_logits[:, z:z+patch_size[0], y:y+patch_size[1], x:x+patch_size[2]] += logits_patch
+                norm_map[:, z:z+patch_size[0], y:y+patch_size[1], x:x+patch_size[2]] += 1
+
+    seg_logits = seg_logits / norm_map
+    return seg_logits[:, :D, :H, :W]  # remove padding
+
 @torch.no_grad()
+def inference_3d_full(model, testloader, args, patch_size=(96,96,96), stride=(48,48,48)):
+    """
+    Full-volume inference using sliding-window stitching.
+    Computes Dice, HD95, Sens, Spec, Prec, Recall, F1 per class and macro avg.
+    """
+    model.eval()
+    metric_sum = None
+
+    for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
+        image = sampled_batch["image"].squeeze(0)  # (C, D, H, W)
+        label = sampled_batch["label"].squeeze(0).numpy()
+        case_name = sampled_batch['case_name'][0]
+
+        seg_logits = sliding_window_inference(
+            model, image, patch_size=patch_size, stride=stride,
+            num_classes=args.num_classes, device="cuda"
+        )
+        pred = torch.argmax(torch.softmax(seg_logits, dim=0), dim=0).cpu().numpy()
+
+        # Compute metrics per class
+        metric_i = []
+        for c in range(1, args.num_classes):  # skip background
+            
+            # Dice + HD95
+            dice_c, hd95_c = calculate_metric_percase(
+                (pred == c).astype(np.uint8),
+                (label == c).astype(np.uint8)
+            )
+
+            # Confusion stats
+            tp, fp, tn, fn = calculate_confusion_stats(pred, label)
+
+            sens = safe_div(tp, tp + fn)       # Sensitivity = Recall
+            spec = safe_div(tn, tn + fp)       # Specificity
+            prec = safe_div(tp, tp + fp)       # Precision
+            rec  = sens                        # Recall (same as Sensitivity)
+            f1   = safe_div(2 * prec * rec, prec + rec)
+
+            metric_i.append((dice_c, hd95_c, sens, spec, prec, rec, f1))
+        metric_i = np.array(metric_i)
+
+        if metric_sum is None:
+            metric_sum = metric_i
+        else:
+            metric_sum += metric_i
+
+        logging.info(
+            f"Case {case_name}: mean Dice = {np.mean(metric_i[:,0]):.4f}, "
+            f"mean HD95 = {np.nanmean(metric_i[:,1]):.4f}"
+        )
+
+    # Average across cases
+    metric_mean = metric_sum / len(testloader.dataset)
+
+    return metric_mean
+
 def calculate_confusion_stats(pred, gt):
     """
     Compute TP, FP, TN, FN for binary masks.
@@ -32,6 +134,7 @@ def calculate_confusion_stats(pred, gt):
 def safe_div(n, d):
     return n / d if d > 0 else 0.0
 
+@torch.no_grad()
 def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     """
     3D inference with extended metrics: Dice, HD95, Sensitivity, Specificity,
@@ -324,12 +427,16 @@ def trainer_3d(args, model, snapshot_path):
         model = nn.DataParallel(model)
 
     # --- Use DiceFocalLoss ---
-    loss_fn = DiceFocalLoss(dice_weight=0.5, focal_weight=0.5,class_weights = [1.0, 2.0, 2.0, 3.0], alpha = [0.1, 0.3, 0.3, 0.3], num_classes=4).to(device)
+    # alpha = [0.1, 0.3, 0.3, 0.3],
+    loss_fn = DiceFocalLoss(dice_weight=0.6, focal_weight=0.4, class_weights = [1.0, 2.0, 2.0, 4.0], num_classes=4).to(device)
 
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
-    )
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, mode="max", factor=0.5, patience=10, min_lr=1e-6
+    # )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    optimizer, T_max=args.max_epochs, eta_min=1e-6
+)
 
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.amp.GradScaler("cuda", enabled=True)
@@ -388,7 +495,8 @@ def trainer_3d(args, model, snapshot_path):
 
         if (epoch_num + 1) % args.eval_interval == 0:
             model.eval()
-            mean_dice, mean_hd95, metrics = inference_3d(model, val_loader, args, test_save_path=test_save_path)
+            # mean_dice, mean_hd95, metrics = inference_3d(model, val_loader, args, test_save_path=test_save_path)
+            mean_dice, mean_hd95, metrics = inference_3d_full(model, val_loader, args, test_save_path=test_save_path)
 
             # --- Save Dice & HD95 history ---
             for k in ["ET", "TC", "WT"]:

@@ -64,8 +64,6 @@ def crop_foreground_backup(modalities, seg, crop_size=(96,96,96)):
     mod_crop = modalities[:, slices[0], slices[1], slices[2]]
     return mod_crop, seg_crop
 
-import numpy as np
-
 def crop_foreground(modalities, seg, crop_size=(96,96,96), tumor_ratio=0.7): 
     """
     Crop subvolume around tumor (with probability tumor_ratio)
@@ -143,67 +141,250 @@ def augment_patch_aligned(modalities, seg, target_shape=(96,96,96), patch_size=4
 # =========================
 # BraTS Dataset
 # =========================
+
 class BraTSDataset(Dataset):
-    def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96), patch_size=4, skip_empty=True):
+    def __init__(
+        self,
+        case_dirs,
+        mode="train",              # NEW: train / val / test
+        transform=True,
+        target_shape=(128,128,128),
+        crop_size=(96,96,96),
+        patch_size=4,
+        skip_empty=True,
+        patches_per_case=1
+    ):
         self.case_dirs = case_dirs
+        self.mode = mode
         self.transform = transform
         self.target_shape = target_shape
         self.crop_size = crop_size
         self.patch_size = patch_size
         self.skip_empty = skip_empty
-        print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
+        self.patches_per_case = patches_per_case
+
+        if self.mode == "train":
+            self.total_samples = len(self.case_dirs) * self.patches_per_case
+        else:
+            self.total_samples = len(self.case_dirs)
+
+        print(f"[{self.mode.upper()}] Loaded {len(self.case_dirs)} cases "
+              f"| Transform: {self.transform} "
+              f"| Patches per case: {self.patches_per_case if self.mode=='train' else 'full-volume'} "
+              f"| Effective samples: {self.total_samples}")
 
     def __len__(self):
-        return len(self.case_dirs)
+        return self.total_samples
 
     def __getitem__(self, idx):
-        case_dir = self.case_dirs[idx]
+        if self.mode == "train":
+            case_idx = idx // self.patches_per_case
+        else:
+            case_idx = idx
 
-        # Load modalities
-        modality_files = {}
-        for m in ["t1","t1ce","t2","flair"]:
-            files = glob.glob(os.path.join(case_dir,f"*{m}.nii*"))
-            if len(files) != 1:
-                print(f"⚠️ Skipping {case_dir}, problem with {m}: {files}")
-                return self.__getitem__((idx+1) % len(self.case_dirs))
-            modality_files[m] = files[0]
+        case_dir = self.case_dirs[case_idx]
 
+        # ---- Load modalities ----
         modalities = []
         for m in ["t1","t1ce","t2","flair"]:
-            img = nib.load(modality_files[m]).get_fdata()
+            file = glob.glob(os.path.join(case_dir, f"*{m}.nii*"))[0]
+            img = nib.load(file).get_fdata()
             img = zscore_normalize(img)
             img = resize_volume(img, self.target_shape)
             modalities.append(img)
         modalities = np.stack(modalities, axis=0)
 
-        # Load segmentation
-        seg_files = glob.glob(os.path.join(case_dir,"*seg.nii*"))
+        # ---- Load segmentation ----
+        seg_files = glob.glob(os.path.join(case_dir, "*seg.nii*"))
+        seg = None
         if len(seg_files) > 0:
             seg = nib.load(seg_files[0]).get_fdata()
-            seg = resize_volume(seg, self.target_shape)
-            seg = seg.astype(np.int32)
+            seg = resize_volume(seg, self.target_shape).astype(np.int32)
             seg[seg == 4] = 3
 
-            # Skip empty masks if enabled
-            if self.skip_empty and np.sum(seg) == 0:
-                return self.__getitem__((idx+1) % len(self.case_dirs))
+        if self.mode == "train":
+            # Skip empty
+            if self.skip_empty and seg is not None and np.sum(seg) == 0:
+                return self.__getitem__((idx+1) % self.total_samples)
 
             # Tumor-aware crop
             modalities, seg = crop_foreground(modalities, seg, self.crop_size)
 
-            # Apply patch-aligned augmentation if transform
+            # Augment or pad
             if self.transform:
                 modalities, seg = augment_patch_aligned(modalities, seg, self.crop_size, self.patch_size)
             else:
                 modalities = crop_or_pad_patch_aligned(modalities, self.crop_size, self.patch_size)
                 seg = crop_or_pad_patch_aligned(seg, self.crop_size, self.patch_size)
 
-            seg = torch.tensor(seg, dtype=torch.long)
         else:
-            seg = None
+            # Validation/test: always return the full preprocessed volume (no crop)
+            if seg is not None:
+                seg = crop_or_pad_patch_aligned(seg, self.target_shape, self.patch_size)
+            modalities = crop_or_pad_patch_aligned(modalities, self.target_shape, self.patch_size)
 
+        # Convert to tensors
         modalities = torch.tensor(modalities, dtype=torch.float32)
-        return {"image": modalities, "label": seg, "case_name": os.path.basename(case_dir)}
+        seg = torch.tensor(seg, dtype=torch.long) if seg is not None else None
+
+        return {
+            "image": modalities,
+            "label": seg,
+            "case_name": os.path.basename(case_dir),
+        }
+
+# class BraTSDataset(Dataset):
+#     def __init__(
+#         self,
+#         case_dirs,
+#         transform=True,
+#         target_shape=(128,128,128),
+#         crop_size=(96,96,96),
+#         patch_size=4,
+#         skip_empty=True,
+#         patches_per_case=1   # NEW
+#     ):
+#         self.case_dirs = case_dirs
+#         self.transform = transform
+#         self.target_shape = target_shape
+#         self.crop_size = crop_size
+#         self.patch_size = patch_size
+#         self.skip_empty = skip_empty
+#         self.patches_per_case = patches_per_case
+
+#         # Effective dataset length
+#         self.total_samples = len(self.case_dirs) * self.patches_per_case
+#         print(f"Loaded {len(self.case_dirs)} cases "
+#               f"| Transform: {self.transform} "
+#               f"| Patches per case: {self.patches_per_case} "
+#               f"| Effective samples: {self.total_samples}")
+
+#     def __len__(self):
+#         return self.total_samples
+
+#     def __getitem__(self, idx):
+#         # Map global idx -> (case, patch index)
+#         case_idx = idx // self.patches_per_case
+#         case_dir = self.case_dirs[case_idx]
+
+#         # Load modalities
+#         modality_files = {}
+#         for m in ["t1","t1ce","t2","flair"]:
+#             files = glob.glob(os.path.join(case_dir, f"*{m}.nii*"))
+#             if len(files) != 1:
+#                 print(f"⚠️ Skipping {case_dir}, problem with {m}: {files}")
+#                 return self.__getitem__((idx+1) % self.total_samples)
+#             modality_files[m] = files[0]
+
+#         modalities = []
+#         for m in ["t1","t1ce","t2","flair"]:
+#             img = nib.load(modality_files[m]).get_fdata()
+#             img = zscore_normalize(img)
+#             img = resize_volume(img, self.target_shape)
+#             modalities.append(img)
+#         modalities = np.stack(modalities, axis=0)
+
+#         # Load segmentation
+#         seg_files = glob.glob(os.path.join(case_dir, "*seg.nii*"))
+#         if len(seg_files) > 0:
+#             seg = nib.load(seg_files[0]).get_fdata()
+#             seg = resize_volume(seg, self.target_shape)
+#             seg = seg.astype(np.int32)
+#             seg[seg == 4] = 3
+
+#             # Skip empty masks if enabled
+#             if self.skip_empty and np.sum(seg) == 0:
+#                 return self.__getitem__((idx+1) % self.total_samples)
+
+#             # Tumor-aware crop → each patch index triggers random crop
+#             modalities, seg = crop_foreground(modalities, seg, self.crop_size)
+
+#             # Apply patch-aligned augmentation if transform
+#             if self.transform:
+#                 modalities, seg = augment_patch_aligned(
+#                     modalities, seg, self.crop_size, self.patch_size
+#                 )
+#             else:
+#                 modalities = crop_or_pad_patch_aligned(
+#                     modalities, self.crop_size, self.patch_size
+#                 )
+#                 seg = crop_or_pad_patch_aligned(
+#                     seg, self.crop_size, self.patch_size
+#                 )
+
+#             seg = torch.tensor(seg, dtype=torch.long)
+#         else:
+#             seg = None
+
+#         modalities = torch.tensor(modalities, dtype=torch.float32)
+#         return {
+#             "image": modalities,
+#             "label": seg,
+#             "case_name": os.path.basename(case_dir),
+#             "patch_id": idx % self.patches_per_case   # NEW: optional
+#         }
+
+# class BraTSDataset(Dataset):
+#     def __init__(self, case_dirs, transform=True, target_shape=(128,128,128), crop_size=(96,96,96), patch_size=4, skip_empty=True):
+#         self.case_dirs = case_dirs
+#         self.transform = transform
+#         self.target_shape = target_shape
+#         self.crop_size = crop_size
+#         self.patch_size = patch_size
+#         self.skip_empty = skip_empty
+#         print(f"Loaded {len(self.case_dirs)} cases | Transform: {self.transform}")
+
+#     def __len__(self):
+#         return len(self.case_dirs)
+
+#     def __getitem__(self, idx):
+#         case_dir = self.case_dirs[idx]
+
+#         # Load modalities
+#         modality_files = {}
+#         for m in ["t1","t1ce","t2","flair"]:
+#             files = glob.glob(os.path.join(case_dir,f"*{m}.nii*"))
+#             if len(files) != 1:
+#                 print(f"⚠️ Skipping {case_dir}, problem with {m}: {files}")
+#                 return self.__getitem__((idx+1) % len(self.case_dirs))
+#             modality_files[m] = files[0]
+
+#         modalities = []
+#         for m in ["t1","t1ce","t2","flair"]:
+#             img = nib.load(modality_files[m]).get_fdata()
+#             img = zscore_normalize(img)
+#             img = resize_volume(img, self.target_shape)
+#             modalities.append(img)
+#         modalities = np.stack(modalities, axis=0)
+
+#         # Load segmentation
+#         seg_files = glob.glob(os.path.join(case_dir,"*seg.nii*"))
+#         if len(seg_files) > 0:
+#             seg = nib.load(seg_files[0]).get_fdata()
+#             seg = resize_volume(seg, self.target_shape)
+#             seg = seg.astype(np.int32)
+#             seg[seg == 4] = 3
+
+#             # Skip empty masks if enabled
+#             if self.skip_empty and np.sum(seg) == 0:
+#                 return self.__getitem__((idx+1) % len(self.case_dirs))
+
+#             # Tumor-aware crop
+#             modalities, seg = crop_foreground(modalities, seg, self.crop_size)
+
+#             # Apply patch-aligned augmentation if transform
+#             if self.transform:
+#                 modalities, seg = augment_patch_aligned(modalities, seg, self.crop_size, self.patch_size)
+#             else:
+#                 modalities = crop_or_pad_patch_aligned(modalities, self.crop_size, self.patch_size)
+#                 seg = crop_or_pad_patch_aligned(seg, self.crop_size, self.patch_size)
+
+#             seg = torch.tensor(seg, dtype=torch.long)
+#         else:
+#             seg = None
+
+#         modalities = torch.tensor(modalities, dtype=torch.float32)
+#         return {"image": modalities, "label": seg, "case_name": os.path.basename(case_dir)}
 
 # =========================
 # Weighted Sampler
@@ -242,13 +423,22 @@ def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96), use_w
     all_cases = get_all_cases(data_dir)
     train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
 
-    train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape, patch_size=patch_size)
+    # train_dataset = BraTSDataset(train_cases, transform=True, target_shape=target_shape, patch_size=patch_size)
+    train_dataset = BraTSDataset(
+        train_cases,
+        transform=True,
+        target_shape=(128,128,128),
+        crop_size=(96,96,96),
+        patches_per_case=4   # ← 4 patches per case
+    )
     val_dataset = BraTSDataset(val_cases, transform=False, target_shape=target_shape, patch_size=patch_size)
 
     if use_weighted_sampler:
         sampler = make_weighted_sampler(train_dataset)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=2, pin_memory=True)
+        # train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=2, pin_memory=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=2, pin_memory=True)
     else:
+        # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
 
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
