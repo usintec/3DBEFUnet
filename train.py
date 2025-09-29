@@ -46,7 +46,7 @@ parser.add_argument('--output_dir', type=str,
 parser.add_argument('--model_name', type=str,
                     default='BEFUnet3D')
 parser.add_argument('--eval_interval', type=int,
-                    default=20, help='evaluation epoch')
+                    default=10, help='evaluation epoch')
 
 args = parser.parse_args()
 

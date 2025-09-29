@@ -123,6 +123,19 @@ def save_checkpoint(state, snapshot_path, filename):
     filepath = os.path.join(snapshot_path, filename)
     torch.save(state, filepath)
 
+def save_pidinet3d(pidinet, save_path, filename, epoch=None):
+    """
+    Save PiDiNet3D weights only.
+    """
+    state_dict = pidinet.state_dict()
+    checkpoint = {
+        "epoch": epoch,
+        "state_dict": state_dict,
+    }
+    os.makedirs(save_path, exist_ok=True)
+    filepath = os.path.join(save_path, filename)
+    torch.save(checkpoint, filepath)
+    print(f"✅ Saved PiDiNet3D checkpoint to {save_path}")
 
 def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
     checkpoints = sorted(
@@ -244,7 +257,7 @@ def trainer_3d(args, model, snapshot_path):
                     )
 
                     # 🔑 Save checkpoints often (keep last 3 only)
-                    if iter_num % 200 == 0:
+                    if iter_num % 50 == 0:
                         ckpt_filename = f"{args.model_name}_iter{iter_num}.pth"
                         save_checkpoint(
                             {
@@ -258,6 +271,7 @@ def trainer_3d(args, model, snapshot_path):
                             ckpt_filename,
                         )
                         logging.info(f"Checkpoint saved: {ckpt_filename}")
+                        save_pidinet3d(model.All2Cross.pyramid.pidinet, snapshot_path, f"{args.model_name}_pidinet_best.pth")
 
                         # ✅ Delete older checkpoints, keep last 3
                         ckpts = sorted(
@@ -302,6 +316,7 @@ def trainer_3d(args, model, snapshot_path):
                     snapshot_path,
                     f"{args.model_name}_best.pth",
                 )
+                save_pidinet3d(model.All2Cross.pyramid.pidinet, snapshot_path, f"{args.model_name}_pidinet_best.pth")
             else:
                 counter += 1
                 logging.info("No improvement. Patience counter = %d/%d", counter, patience)

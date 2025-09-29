@@ -130,7 +130,7 @@ class PyramidFeatures3D(nn.Module):
         )
 
         # Build PiDiNet3D and load pretrained PDC weights (kept from original code)
-        pidinet = PiDiNet3D(30, config_model(config.pdcs), dil=12, sa=True).eval()
+        self.pidinet = PiDiNet3D(30, config_model(config.pdcs), dil=12, sa=True).eval()
 
         # load PDC weights if path provided
         if hasattr(config, "PDC_pretrained_path") and config.PDC_pretrained_path:
@@ -141,12 +141,12 @@ class PyramidFeatures3D(nn.Module):
             for k, v in state_dict.items():
                 name = k[7:] if k.startswith("module.") else k
                 new_state_dict[name] = v
-            pidinet.load_state_dict(new_state_dict)
+            self.pidinet.load_state_dict(new_state_dict)
         else:
             print("Warning: PDC_pretrained_path not found in config — PiDiNet3D will remain randomly initialized.")
 
         # keep the first N layers as in original implementation
-        self.pidinet_layers = nn.ModuleList(pidinet.children())[:17]
+        self.pidinet_layers = nn.ModuleList(self.pidinet.children())[:17]
 
         # 3D channel projection layers (same shapes as original code; uses config)
         self.p1_ch = nn.Conv3d(config.cnn_pyramid_fm[0], config.swin_pyramid_fm[0], kernel_size=1, stride=4)
