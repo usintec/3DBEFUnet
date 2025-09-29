@@ -82,10 +82,16 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
 
     # Average over cases
     metric_mean = metric_sum / len(testloader.dataset)
-
+    class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
+        i: f"class{i}" for i in range(1, args.num_classes)
+    }
+    per_class_metrics = {}
     for i in range(1, args.num_classes):
-        logging.info('Mean class %d mean_dice %f mean_hd95 %f',
-                     i, metric_mean[i-1][0], metric_mean[i-1][1])
+        logging.info(
+            f"Mean {class_names[i]}: Dice = {metric_mean[i-1][0]:.4f}, HD95 = {metric_mean[i-1][1]:.4f}"
+        )
+        # logging.info('Mean class %d mean_dice %f mean_hd95 %f',
+        #              i, metric_mean[i-1][0], metric_mean[i-1][1])
 
     performance = np.mean(metric_mean, axis=0)[0]
     mean_hd95 = np.mean(metric_mean, axis=0)[1]
