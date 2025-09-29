@@ -212,8 +212,8 @@ def trainer_3d(args, model, snapshot_path):
     max_iterations = args.max_epochs * len(train_loader)
     logging.info("%d iterations per epoch. %d max iterations", len(train_loader), max_iterations)
 
-    best_performance = 0.0
-    patience = getattr(args, "patience", 3)  # 🔑 stop if no improvement for N evals
+    best_performance = 0.320520
+    patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
     counter = 0
 
     dice_hist, hd95_hist = [], []
