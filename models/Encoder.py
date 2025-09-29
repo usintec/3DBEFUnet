@@ -8,6 +8,7 @@ from einops.layers.torch import Rearrange
 from utils import BasicLayer3D, PatchMerging3D, trunc_normal_
 from torch.nn import functional as F
 from timm.models.layers import trunc_normal_
+import os
 
 
 class SwinTransformer3D(nn.Module):
@@ -132,18 +133,46 @@ class PyramidFeatures3D(nn.Module):
         # Build PiDiNet3D and load pretrained PDC weights (kept from original code)
         self.pidinet = PiDiNet3D(30, config_model(config.pdcs), dil=12, sa=True).eval()
 
-        # load PDC weights if path provided
-        if hasattr(config, "PDC_pretrained_path") and config.PDC_pretrained_path:
-            checkpoint_PDC = torch.load(config.PDC_pretrained_path, map_location="cpu")
+                # Load PiDiNet3D weights from snapshot_path
+        pidinet_ckpt_path = os.path.join("/content/drive/MyDrive/outputs/BEFUnet3D", "BEFUnet3D_pidinet_best.pth")
+
+        if os.path.exists(pidinet_ckpt_path):
+            checkpoint_PDC = torch.load(pidinet_ckpt_path, map_location="cpu")
+
+            # Your save function stored {"epoch": ..., "state_dict": ...}
             state_dict = checkpoint_PDC.get("state_dict", checkpoint_PDC)
+
             from collections import OrderedDict
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
+                # Remove "module." prefix if trained with DataParallel
                 name = k[7:] if k.startswith("module.") else k
                 new_state_dict[name] = v
-            self.pidinet.load_state_dict(new_state_dict)
+
+            missing, unexpected = self.pidinet.load_state_dict(new_state_dict, strict=False)
+
+            print(f"✅ Loaded PiDiNet3D weights from {pidinet_ckpt_path}")
+            if missing:
+                print(f"⚠️ Missing keys in checkpoint: {missing}")
+            if unexpected:
+                print(f"⚠️ Unexpected keys in checkpoint: {unexpected}")
+
         else:
-            print("Warning: PDC_pretrained_path not found in config — PiDiNet3D will remain randomly initialized.")
+            print(f"⚠️ Warning: PiDiNet3D checkpoint not found at {pidinet_ckpt_path} — using random initialization.")
+
+
+        # load PDC weights if path provided
+        # if hasattr(config, "PDC_pretrained_path") and config.PDC_pretrained_path:
+        #     checkpoint_PDC = torch.load(config.PDC_pretrained_path, map_location="cpu")
+        #     state_dict = checkpoint_PDC.get("state_dict", checkpoint_PDC)
+        #     from collections import OrderedDict
+        #     new_state_dict = OrderedDict()
+        #     for k, v in state_dict.items():
+        #         name = k[7:] if k.startswith("module.") else k
+        #         new_state_dict[name] = v
+        #     self.pidinet.load_state_dict(new_state_dict)
+        # else:
+        #     print("Warning: PDC_pretrained_path not found in config — PiDiNet3D will remain randomly initialized.")
 
         # keep the first N layers as in original implementation
         self.pidinet_layers = nn.ModuleList(self.pidinet.children())[:17]
