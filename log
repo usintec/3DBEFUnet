@@ -1,4 +1,10 @@
 iter14750
+📊 Final Evaluation Results
+ET: Dice=0.3219, HD95=5.0994
+TC: Dice=0.3649, HD95=8.7215
+WT: Dice=0.4533, HD95=7.3291
+Mean Dice: 0.3800, Mean HD95: 7.0500
+
 Mean ET: Dice = 0.3219, HD95 = 4.9920
 Mean class 1 mean_dice 0.321881 mean_hd95 4.992027
 Mean TC: Dice = 0.3645, HD95 = 8.6012
