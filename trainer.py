@@ -217,7 +217,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance =  0.4090
+    best_performance =  0.411796
     patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
     counter = 0
 
