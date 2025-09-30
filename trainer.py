@@ -200,6 +200,11 @@ def trainer_3d(args, model, snapshot_path):
     from models.Losses import ClassWiseDiscriminativeLoss
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
 
+    max_epoch = args.max_epochs
+    max_iterations = args.max_epochs * len(train_loader)
+    logging.info("%d iterations per epoch. %d max iterations", len(train_loader), max_iterations)
+
+
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=max_iterations, eta_min=1e-6
@@ -210,10 +215,6 @@ def trainer_3d(args, model, snapshot_path):
     model, optimizer, scaler, start_epoch, iter_num = load_checkpoint(
         model, optimizer, scaler, snapshot_path, device
     )
-
-    max_epoch = args.max_epochs
-    max_iterations = args.max_epochs * len(train_loader)
-    logging.info("%d iterations per epoch. %d max iterations", len(train_loader), max_iterations)
 
     best_performance = 0.403487
     patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
