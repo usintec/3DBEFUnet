@@ -129,7 +129,7 @@ if __name__ == "__main__":
                         default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
                         help='root dir for training data')
     parser.add_argument('--model_path', type=str,
-                        default='/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_iter14950.pth')
+                        default='/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_best.pth')
     parser.add_argument('--num_classes', type=int, default=4)
     parser.add_argument('--visualize', action='store_true', help='save sample visualizations')
     args = parser.parse_args()
