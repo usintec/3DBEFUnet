@@ -196,7 +196,7 @@ def trainer_3d(args, model, snapshot_path):
         model = nn.DataParallel(model)
 
     class_weights = torch.tensor([1.0, 2.0, 2.0, 4.0]).to(device)
-    ce_loss = CrossEntropyLoss(class_weights=class_weights)
+    ce_loss = CrossEntropyLoss(weight=class_weights)
     dice_loss = DiceLoss(num_classes)
     from models.Losses import ClassWiseDiscriminativeLoss
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
