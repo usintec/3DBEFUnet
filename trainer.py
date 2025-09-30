@@ -201,6 +201,11 @@ def trainer_3d(args, model, snapshot_path):
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
 
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+
+     # 🔥 Cosine annealing scheduler (auto adjusts LR)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=max_iterations, eta_min=1e-6
+    )
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.cuda.amp.GradScaler(enabled=True)
 
@@ -245,12 +250,19 @@ def trainer_3d(args, model, snapshot_path):
                     scaler.step(optimizer)
                     scaler.update()
 
-                    lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr_
+                    # lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+                    # for param_group in optimizer.param_groups:
+                    #     param_group['lr'] = lr_
+                    scheduler.step()
 
+                    # Logging
+                    current_lr = optimizer.param_groups[0]['lr']
+                    
                     iter_num += 1
-                    writer.add_scalar('info/lr', lr_, iter_num)
+                    writer.add_scalar('info/lr', current_lr, iter_num)
+
+                    # iter_num += 1
+                    # writer.add_scalar('info/lr', lr_, iter_num)
                     writer.add_scalar('info/total_loss', loss.item(), iter_num)
                     writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
                     writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
