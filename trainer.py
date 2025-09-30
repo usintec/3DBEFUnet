@@ -195,7 +195,8 @@ def trainer_3d(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
 
-    ce_loss = CrossEntropyLoss()
+    class_weights = torch.tensor([1.0, 2.0, 2.0, 4.0]).to(device)
+    ce_loss = CrossEntropyLoss(class_weights=class_weights)
     dice_loss = DiceLoss(num_classes)
     from models.Losses import ClassWiseDiscriminativeLoss
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
@@ -216,7 +217,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance = 0.403487
+    best_performance =  0.4090
     patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
     counter = 0
 
@@ -239,7 +240,7 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = 0.5 * loss_ce + 0.5 * loss_dice + 0.1 * loss_dlf
+                        loss = (0.4 * loss_ce) + (0.5 * loss_dice) + (0.1 * loss_dlf)
                     else:
                         loss = None
 
@@ -269,6 +270,7 @@ def trainer_3d(args, model, snapshot_path):
                     # 🔑 Save checkpoints often (keep last 3 only)
                     if iter_num % 50 == 0:
                         ckpt_filename = f"{args.model_name}_iter{iter_num}.pth"
+                        pidinet_filename = f"{args.model_name}_pidinet{iter_num}.pth"
                         save_checkpoint(
                             {
                                 "model_state": model.state_dict(),
@@ -281,18 +283,27 @@ def trainer_3d(args, model, snapshot_path):
                             ckpt_filename,
                         )
                         logging.info(f"Checkpoint saved: {ckpt_filename}")
-                        save_pidinet3d(model.All2Cross.pyramid.pidinet, snapshot_path, f"{args.model_name}_pidinet_best.pth")
+                        save_pidinet3d(model.All2Cross.pyramid.pidinet, snapshot_path, f"{pidinet_filename}")
 
                         # ✅ Delete older checkpoints, keep last 3
                         ckpts = sorted(
                             [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "iter" in f],
                             key=lambda x: int(x.split("iter")[1].split(".pth")[0])
                         )
+                        pidinet = sorted(
+                            [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "iter" in f],
+                            key=lambda x: int(x.split("pidinet")[1].split(".pth")[0])
+                        )
                         if len(ckpts) > 3:
                             old_ckpts = ckpts[:-3]
                             for old in old_ckpts:
                                 os.remove(os.path.join(snapshot_path, old))
                                 logging.info(f"Deleted old checkpoint: {old}")
+                        if len(pidinet) > 3:
+                            old_pidinet = ckpts[:-3]
+                            for old in old_pidinet:
+                                os.remove(os.path.join(snapshot_path, old))
+                                logging.info(f"Deleted old pidinet checkpoint: {old}")
 
             except RuntimeError as e:
                 if 'out of memory' in str(e):
@@ -327,169 +338,6 @@ def trainer_3d(args, model, snapshot_path):
                     f"{args.model_name}_best.pth",
                 )
                 save_pidinet3d(model.All2Cross.pyramid.pidinet, snapshot_path, f"{args.model_name}_pidinet_best.pth")
-            else:
-                counter += 1
-                logging.info("No improvement. Patience counter = %d/%d", counter, patience)
-
-            if counter >= patience:
-                logging.info("⏹ Early stopping triggered at epoch %d", epoch_num)
-                break
-            model.train()
-
-    plot_result(dice_hist, hd95_hist, snapshot_path, args)
-    writer.close()
-    return "Training Finished!"
-
-def trainer_3d_no_limit_on_periodic_checkpoint(args, model, snapshot_path):
-    import datetime
-    date_and_time = datetime.datetime.now()
-
-    os.makedirs(os.path.join(snapshot_path, 'test'), exist_ok=True)
-    test_save_path = os.path.join(snapshot_path, 'test')
-
-    # Logging
-    logging.basicConfig(
-        filename=os.path.join(snapshot_path, f"{args.model_name}_{date_and_time:%Y%m%d-%H%M%S}_log.txt"),
-        level=logging.INFO,
-        format='[%(asctime)s.%(msecs)03d] %(message)s',
-        datefmt='%H:%M:%S'
-    )
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-    logging.info(str(args))
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info("Using device: %s", device)
-
-    base_lr = args.base_lr
-    num_classes = args.num_classes
-    batch_size = args.batch_size * args.n_gpu
-
-    train_loader, val_loader = get_train_val_loaders(args.root_path, batch_size=batch_size)
-
-    model = model.to(device)
-    if args.n_gpu > 1:
-        model = nn.DataParallel(model)
-
-    ce_loss = CrossEntropyLoss()
-    dice_loss = DiceLoss(num_classes)
-    from models.Losses import ClassWiseDiscriminativeLoss
-    dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
-
-    optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
-    # 🔥 Cosine annealing scheduler (auto adjusts LR)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max_iterations, eta_min=1e-6
-    )
-    writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
-    scaler = torch.cuda.amp.GradScaler(enabled=True)
-
-    model, optimizer, scaler, start_epoch, iter_num = load_checkpoint(
-        model, optimizer, scaler, snapshot_path, device
-    )
-
-    max_epoch = args.max_epochs
-    max_iterations = args.max_epochs * len(train_loader)
-    logging.info("%d iterations per epoch. %d max iterations", len(train_loader), max_iterations)
-
-    best_performance = 0.0
-    patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
-    counter = 0
-
-    dice_hist, hd95_hist = [], []
-    iterator = tqdm(range(start_epoch, max_epoch), ncols=70, initial=iter_num, total=max_iterations)
-
-    for epoch_num in iterator:
-        model.train()
-        for i_batch, sampled_batch in enumerate(train_loader):
-            image_batch = sampled_batch['image'].to(device, non_blocking=True)
-            label_batch = sampled_batch['label']
-            if label_batch is not None:
-                label_batch = label_batch.to(device, non_blocking=True)
-
-            try:
-                with torch.cuda.amp.autocast(enabled=True):
-                    seg_logits, embeddings, _ = model(image_batch)
-
-                    if label_batch is not None:
-                        loss_ce = ce_loss(seg_logits, label_batch.long())
-                        loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
-                        loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = 0.4 * loss_ce + 0.6 * loss_dice + 0.1 * loss_dlf
-                    else:
-                        loss = None
-
-                if loss is not None:
-                    optimizer.zero_grad()
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-
-                    
-                    # 🔥 Scheduler update (replaces manual LR decay)
-                    scheduler.step()
-
-                    # Logging
-                    current_lr = optimizer.param_groups[0]['lr']
-                    iter_num += 1
-                    writer.add_scalar('info/lr', current_lr, iter_num)
-                    # writer.add_scalar('info/lr', lr_, iter_num)
-                    writer.add_scalar('info/total_loss', loss.item(), iter_num)
-                    writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
-                    writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
-                    writer.add_scalar('info/loss_dlf', loss_dlf.item(), iter_num)
-
-                    logging.info(
-                        'iter %d : total %.5f | ce %.5f | dice %.5f | dlf %.5f',
-                        iter_num, loss.item(), loss_ce.item(), loss_dice.item(), loss_dlf.item()
-                    )
-
-                    # 🔑 Save checkpoints often
-                    if iter_num % 200 == 0:
-                        save_checkpoint(
-                            {
-                                "model_state": model.state_dict(),
-                                "optimizer_state": optimizer.state_dict(),
-                                "scaler_state": scaler.state_dict(),
-                                "epoch": epoch_num,
-                                "iter_num": iter_num,
-                            },
-                            snapshot_path,
-                            f"{args.model_name}_iter{iter_num}.pth",
-                        )
-                        logging.info(f"Checkpoint saved at iter {iter_num}")
-
-            except RuntimeError as e:
-                if 'out of memory' in str(e):
-                    logging.warning("OOM at iter %d, skipping", iter_num)
-                    torch.cuda.empty_cache()
-                    continue
-                else:
-                    raise
-
-        # 🔑 Validation every eval_interval
-        if (epoch_num + 1) % args.eval_interval == 0:
-            model.eval()
-            mean_dice, mean_hd95 = inference_3d(model, val_loader, args, test_save_path=test_save_path)
-            dice_hist.append(mean_dice)
-            hd95_hist.append(mean_hd95)
-
-            if mean_dice > best_performance:
-                best_performance = mean_dice
-                counter = 0  # reset patience
-                logging.info("New best Dice = %.4f at epoch %d", mean_dice, epoch_num)
-
-                # 🔑 Save best model
-                save_checkpoint(
-                    {
-                        "model_state": model.state_dict(),
-                        "optimizer_state": optimizer.state_dict(),
-                        "scaler_state": scaler.state_dict(),
-                        "epoch": epoch_num,
-                        "iter_num": iter_num,
-                    },
-                    snapshot_path,
-                    f"{args.model_name}_best.pth",
-                )
             else:
                 counter += 1
                 logging.info("No improvement. Patience counter = %d/%d", counter, patience)

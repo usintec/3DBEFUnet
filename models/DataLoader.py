@@ -166,7 +166,11 @@ class BraTSDataset(Dataset):
             seg = seg.astype(np.int32)
             seg[seg == 4] = 3
 
-            if self.transform:
+            if self.transform and seg is not None:
+                # First crop around tumor / random
+                modalities, seg = crop_foreground(modalities, seg, crop_size=self.target_shape)
+
+                # Then apply augmentations
                 modalities, seg = augment(modalities, seg)
 
             seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
@@ -216,3 +220,62 @@ def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
 
 
     return train_loader, val_loader
+
+def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.7, et_ratio=0.5):
+    """
+    Crop a 3D subvolume around tumor (with probability tumor_ratio).
+    Prioritize ET voxels with probability et_ratio.
+
+    Args:
+        modalities: np.array (4, H, W, D)
+        seg: np.array (H, W, D)
+        crop_size: tuple, size of the crop
+        tumor_ratio: probability to center crop on any tumor voxel
+        et_ratio: probability to specifically center crop on ET voxel
+
+    Returns:
+        cropped_modalities, cropped_seg
+    """
+    H, W, D = seg.shape
+    cz, cy, cx = crop_size
+
+    def get_random_crop(center):
+        z, y, x = center
+        z1 = max(0, z - cz // 2); z2 = min(H, z1 + cz)
+        y1 = max(0, y - cy // 2); y2 = min(W, y1 + cy)
+        x1 = max(0, x - cx // 2); x2 = min(D, x1 + cx)
+
+        return (
+            modalities[:, z1:z2, y1:y2, x1:x2],
+            seg[z1:z2, y1:y2, x1:x2],
+        )
+
+    if random.random() < tumor_ratio and seg.sum() > 0:
+        # choose ET voxel first (label=1 in BraTS remapped scheme) with et_ratio
+        if random.random() < et_ratio and np.any(seg == 1):
+            coords = np.argwhere(seg == 1)
+        else:
+            coords = np.argwhere(seg > 0)
+        center = coords[random.randint(0, len(coords) - 1)]
+    else:
+        # random crop anywhere
+        center = (
+            random.randint(0, H - 1),
+            random.randint(0, W - 1),
+            random.randint(0, D - 1),
+        )
+
+    crop_mods, crop_seg = get_random_crop(center)
+
+    # pad if crop is smaller than target
+    pad_width = [(0, 0)]
+    for dim, target in zip(crop_seg.shape, crop_size):
+        pad_before = (target - dim) // 2 if dim < target else 0
+        pad_after = target - dim - pad_before if dim < target else 0
+        pad_width.append((pad_before, pad_after))
+
+    crop_mods = np.pad(crop_mods, pad_width, mode="constant")
+    crop_seg = np.pad(crop_seg, pad_width[1:], mode="constant")
+
+    return crop_mods, crop_seg
+

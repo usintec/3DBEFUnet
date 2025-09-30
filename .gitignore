@@ -10,3 +10,4 @@ __pycache__/
 
 # Ignore cache inside subfolders
 */__pycache__/
+.vscode
