@@ -295,7 +295,10 @@ def trainer_3d(args, model, snapshot_path):
                             key=lambda x: int(x.split("iter")[1].split(".pth")[0])
                         )
                         pidinet_ckpts = sorted(
-                            [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "pidinet" in f],
+                            [
+                                f for f in os.listdir(snapshot_path)
+                                if f.startswith(args.model_name) and "pidinet" in f and "_best" not in f
+                            ],
                             key=lambda x: int(x.split("pidinet")[1].split(".pth")[0])
                         )
                         if len(ckpts) > 3:
