@@ -287,11 +287,11 @@ def trainer_3d(args, model, snapshot_path):
 
                         # ✅ Delete older checkpoints, keep last 3
                         ckpts = sorted(
-                            [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "iter" in f],
+                            [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "iter" in f and "pidinet" not in f],
                             key=lambda x: int(x.split("iter")[1].split(".pth")[0])
                         )
-                        pidinet = sorted(
-                            [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "iter" in f],
+                        pidinet_ckpts = sorted(
+                            [f for f in os.listdir(snapshot_path) if f.startswith(args.model_name) and "pidinet" in f],
                             key=lambda x: int(x.split("pidinet")[1].split(".pth")[0])
                         )
                         if len(ckpts) > 3:
@@ -299,8 +299,9 @@ def trainer_3d(args, model, snapshot_path):
                             for old in old_ckpts:
                                 os.remove(os.path.join(snapshot_path, old))
                                 logging.info(f"Deleted old checkpoint: {old}")
-                        if len(pidinet) > 3:
-                            old_pidinet = ckpts[:-3]
+
+                        if len(pidinet_ckpts) > 3:
+                            old_pidinet = pidinet_ckpts[:-3]
                             for old in old_pidinet:
                                 os.remove(os.path.join(snapshot_path, old))
                                 logging.info(f"Deleted old pidinet checkpoint: {old}")
