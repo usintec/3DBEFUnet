@@ -235,7 +235,7 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = 0.4 * loss_ce + 0.6 * loss_dice + 0.1 * loss_dlf
+                        loss = 0.5 * loss_ce + 0.5 * loss_dice + 0.1 * loss_dlf
                     else:
                         loss = None
 
