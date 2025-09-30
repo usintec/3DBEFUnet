@@ -144,7 +144,7 @@ def save_pidinet3d(pidinet, save_path, filename, epoch=None):
 
 def load_checkpoint(model, optimizer, scaler, snapshot_path, device):
     checkpoints = sorted(
-        [f for f in os.listdir(snapshot_path) if f.endswith(".pth")],
+        [f for f in os.listdir(snapshot_path) if f.endswith(".pth") and f != "BEFUnet3D_pidinet_best.pth"],
         key=lambda x: os.path.getmtime(os.path.join(snapshot_path, x)),
     )
     if not checkpoints:
