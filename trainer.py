@@ -212,7 +212,7 @@ def trainer_3d(args, model, snapshot_path):
     max_iterations = args.max_epochs * len(train_loader)
     logging.info("%d iterations per epoch. %d max iterations", len(train_loader), max_iterations)
 
-    best_performance = 0.3814
+    best_performance = 0.3949
     patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
     counter = 0
 
@@ -371,6 +371,10 @@ def trainer_3d_no_limit_on_periodic_checkpoint(args, model, snapshot_path):
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
 
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+    # 🔥 Cosine annealing scheduler (auto adjusts LR)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=max_iterations, eta_min=1e-6
+    )
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.cuda.amp.GradScaler(enabled=True)
 
@@ -415,12 +419,18 @@ def trainer_3d_no_limit_on_periodic_checkpoint(args, model, snapshot_path):
                     scaler.step(optimizer)
                     scaler.update()
 
-                    lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] = lr_
+                    # lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
+                    # for param_group in optimizer.param_groups:
+                    #     param_group['lr'] = lr_
+                                    # 🔥 Scheduler update (replaces manual LR decay)
+                    scheduler.step()
 
+                    # Logging
+                    current_lr = optimizer.param_groups[0]['lr']
+                    
                     iter_num += 1
-                    writer.add_scalar('info/lr', lr_, iter_num)
+                    writer.add_scalar('info/lr', current_lr, iter_num)
+                    # writer.add_scalar('info/lr', lr_, iter_num)
                     writer.add_scalar('info/total_loss', loss.item(), iter_num)
                     writer.add_scalar('info/loss_ce', loss_ce.item(), iter_num)
                     writer.add_scalar('info/loss_dice', loss_dice.item(), iter_num)
