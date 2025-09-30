@@ -7,6 +7,12 @@ Mean WT: Dice = 0.4529, HD95 = 7.3537
 Mean class 3 mean_dice 0.452945 mean_hd95 7.353685
 Testing performance (best-val model): mean_dice: 0.379790  mean_hd95: 6.982288
 
+BEFUnet3D_iter15000
+ET: Dice=0.2663, HD95=6.2512
+TC: Dice=0.4635, HD95=6.8514
+WT: Dice=0.4547, HD95=7.1726
+Mean Dice: 0.3949, Mean HD95: 6.7584
+
 BEFUnet3D_iter15050
 ET: Dice=0.2538, HD95=6.5591
 TC: Dice=0.4530, HD95=6.9633
