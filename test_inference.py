@@ -9,38 +9,22 @@ import random
 import configs.BEFUnet_Config as configs
 from models.BEFUnet import BEFUnet3D
 from models.DataLoader import get_train_val_loaders
-
-
-# -------------------------------
-# 🔹 Safe Metric Function
-# -------------------------------
-def calculate_metric_percase(pred, gt):
-    """
-    pred, gt = binary masks (0/1)
-    Returns Dice and HD95 (both float).
-    """
-    from medpy import metric
-
-    if pred.sum() > 0 and gt.sum() > 0:
-        dice = float(metric.binary.dc(pred, gt))
-        hd95 = float(metric.binary.hd95(pred, gt))
-        return dice, hd95
-    else:
-        # No overlap → Dice = 0, HD95 undefined → set to large value
-        return 0.0, 0.0
-
+from utils import calculate_metric_percase
 
 # -------------------------------
 # 🔹 Device setup
 # -------------------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 # -------------------------------
 # 🔹 Inference & Evaluation
 # -------------------------------
 @torch.no_grad()
 def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
+    """
+    Unified inference & evaluation with optional visualization.
+    Uses valid_mask logic to ignore empty cases (same as newer version).
+    """
     model.eval()
     metric_sum = None
     metric_counts = None
@@ -61,12 +45,18 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
 
         # Dice/HD95 per class
         metric_i = []
+        valid_mask = []
         for c in range(1, args.num_classes):  # skip background
-            dice, hd95 = calculate_metric_percase(
+            dice_hd = calculate_metric_percase(
                 (prediction_np == c).astype(np.uint8),
                 (label_np == c).astype(np.uint8)
             )
-            metric_i.append([dice, hd95])
+            if dice_hd is not None and not np.any(np.isnan(dice_hd)):
+                metric_i.append(dice_hd)
+                valid_mask.append(True)
+            else:
+                metric_i.append((0.0, 0.0))   # placeholder
+                valid_mask.append(False)
 
         metric_i = np.array(metric_i, dtype=np.float32)
 
@@ -74,15 +64,20 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
             metric_sum = np.zeros_like(metric_i, dtype=float)  # (num_classes-1, 2)
             metric_counts = np.zeros((args.num_classes - 1,), dtype=int)
 
-        # Accumulate only valid (non-nan) results
-        for c in range(metric_i.shape[0]):
-            if not np.any(np.isnan(metric_i[c])):  # skip nan rows
-                metric_sum[c] += metric_i[c]
-                metric_counts[c] += 1
+        # accumulate only valid metrics
+        for j, valid in enumerate(valid_mask):
+            if valid:
+                metric_sum[j] += metric_i[j]
+                metric_counts[j] += 1
 
-        # Logging per case
-        mean_dice, mean_hd95 = np.mean(metric_i, axis=0)
-        print(f"[{i_batch}] {case_name}: Dice={mean_dice:.4f}, HD95={mean_hd95:.4f}")
+        # Logging per case (average over valid classes only)
+        valid_scores = [metric_i[j] for j, v in enumerate(valid_mask) if v]
+        if valid_scores:
+            mean_dice_case = np.mean([d for d, _ in valid_scores])
+            mean_hd95_case = np.mean([h for _, h in valid_scores])
+            print(f"[{i_batch}] {case_name}: Dice={mean_dice_case:.4f}, HD95={mean_hd95_case:.4f}")
+        else:
+            print(f"[{i_batch}] {case_name}: skipped (no valid classes)")
 
         # Visualization (optional, single slice per case)
         if visualize:
@@ -119,12 +114,13 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
             print(f"🖼 Saved visualization to {out_file}")
 
     # ---- Final aggregation ----
-    metric_mean = np.zeros_like(metric_sum)
-    for c in range(metric_sum.shape[0]):
-        if metric_counts[c] > 0:
-            metric_mean[c] = metric_sum[c] / metric_counts[c]
+    metric_mean = []
+    for j in range(args.num_classes - 1):
+        if metric_counts[j] > 0:
+            metric_mean.append(metric_sum[j] / metric_counts[j])
         else:
-            metric_mean[c] = [0.0, 0.0]  # mark invalid classes as 0
+            metric_mean.append((0.0, 0.0))  # no valid cases for this class
+    metric_mean = np.array(metric_mean)
 
     class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
         i: f"class{i}" for i in range(1, args.num_classes)
@@ -135,15 +131,10 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         dice_i, hd95_i = metric_mean[i-1]
         print(f"{class_names[i]}: Dice={dice_i:.4f}, HD95={hd95_i:.4f}")
 
-    # ✅ Global mean only over valid classes
-    valid_class_mask = metric_counts > 0
-    if np.any(valid_class_mask):
-        performance = np.mean(metric_mean[valid_class_mask, 0])  # Dice
-        mean_hd95 = np.mean(metric_mean[valid_class_mask, 1])    # HD95
-    else:
-        performance, mean_hd95 = 0.0, 0.0
-
-    print(f"Mean Dice (valid classes): {performance:.4f}, Mean HD95 (valid classes): {mean_hd95:.4f}")
+    # mean over valid classes only
+    performance = np.mean([m[0] for m in metric_mean if m[0] > 0]) if any(m[0] > 0 for m in metric_mean) else 0
+    mean_hd95 = np.mean([m[1] for m in metric_mean if m[1] > 0]) if any(m[1] > 0 for m in metric_mean) else 0
+    print(f"Mean Dice: {performance:.4f}, Mean HD95: {mean_hd95:.4f}")
 
     return performance, mean_hd95
 
