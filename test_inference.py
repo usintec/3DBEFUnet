@@ -55,10 +55,14 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         metric_i = np.array(metric_i, dtype=np.float32)
 
         if metric_sum is None:
-            metric_sum = metric_i.astype(np.float32)
-        else:
-            metric_sum += metric_i.astype(np.float32)
-
+            metric_sum = np.zeros_like(metric_i, dtype=float)  # (num_classes-1, 2)
+            metric_counts = np.zeros((args.num_classes - 1,), dtype=int)
+        
+        # Accumulate only valid (non-nan) results
+        for c in range(metric_i.shape[0]):
+            if not np.any(np.isnan(metric_i[c])):  # skip nan rows
+                metric_sum[c] += metric_i[c]
+                metric_counts[c] += 1
 
         # Logging per case
         mean_dice, mean_hd95 = np.mean(metric_i, axis=0)
@@ -99,8 +103,13 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
             print(f"🖼 Saved visualization to {out_file}")
 
     # ---- Final aggregation ----
-    metric_mean = metric_sum / len(testloader.dataset)
-    # mean_acc = acc_sum / len(testloader)
+    metric_mean = np.zeros_like(metric_sum)
+    for c in range(metric_sum.shape[0]):
+        if metric_counts[c] > 0:
+            metric_mean[c] = metric_sum[c] / metric_counts[c]
+        else:
+            metric_mean[c] = [0.0, 0.0]  # or np.nan if you want to mark invalid
+
 
     class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
         i: f"class{i}" for i in range(1, args.num_classes)
