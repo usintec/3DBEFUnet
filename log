@@ -54,3 +54,9 @@ ET: Dice=0.2806, HD95=6.2588
 TC: Dice=0.4260, HD95=7.6291
 WT: Dice=0.4378, HD95=8.9621
 Mean Dice: 0.3814, Mean HD95: 7.6166
+
+Mean ET: Dice = 0.3407, HD95 = 5.2647
+Mean TC: Dice = 0.5215, HD95 = 6.3076
+Mean WT: Dice = 0.5239, HD95 = 6.7101
+Testing performance (best-val model): mean_dice: 0.462042  mean_hd95: 6.094137
+New best Dice = 0.4620 at epoch 90
