@@ -168,10 +168,11 @@ class BraTSDataset(Dataset):
 
             if self.transform and seg is not None:
                 # First crop around tumor / random
-                modalities, seg = crop_foreground(modalities, seg, crop_size=self.target_shape)
+                # modalities, seg = crop_foreground(modalities, seg, crop_size=self.target_shape)
 
                 # Then apply augmentations
                 modalities, seg = augment(modalities, seg)
+
 
             seg = torch.tensor(seg, dtype=torch.long)  # (H,W,D)
         else:
@@ -221,7 +222,7 @@ def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
 
     return train_loader, val_loader
 
-def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.7, et_ratio=0.5):
+def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.7, et_ratio=0.3):
     """
     Crop a 3D subvolume around tumor (with probability tumor_ratio).
     Prioritize ET voxels with probability et_ratio.
