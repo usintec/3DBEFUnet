@@ -168,7 +168,7 @@ class BraTSDataset(Dataset):
 
             if self.transform and seg is not None:
                 # First crop around tumor / random
-                # modalities, seg = crop_foreground(modalities, seg, crop_size=self.target_shape)
+                modalities, seg = crop_foreground(modalities, seg, crop_size=self.target_shape)
 
                 # Then apply augmentations
                 modalities, seg = augment(modalities, seg)
