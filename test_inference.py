@@ -51,12 +51,14 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
                     (label_np == c).astype(np.uint8)
                 )
             )
-        metric_i = np.array(metric_i)
+        
+        metric_i = np.array(metric_i, dtype=np.float32)
 
         if metric_sum is None:
-            metric_sum = metric_i
+            metric_sum = metric_i.astype(np.float32)
         else:
-            metric_sum += metric_i
+            metric_sum += metric_i.astype(np.float32)
+
 
         # Logging per case
         mean_dice, mean_hd95 = np.mean(metric_i, axis=0)
