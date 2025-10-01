@@ -48,15 +48,27 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         valid_mask = []
         for c in range(1, args.num_classes):  # skip background
             dice_hd = calculate_metric_percase(
-                (prediction_np == c).astype(np.uint8),
-                (label_np == c).astype(np.uint8)
+            (prediction_np == c).astype(np.uint8),
+            (label_np == c).astype(np.uint8)
             )
-            if dice_hd is not None and not np.any(np.isnan(dice_hd)):
-                metric_i.append(dice_hd)
-                valid_mask.append(True)
-            else:
-                metric_i.append((0.0, 0.0))   # placeholder
+
+        # Ensure it's a tuple of floats (or None handled)
+        if dice_hd is not None:
+            try:
+                dice_val, hd95_val = map(float, dice_hd)
+                if not (np.isnan(dice_val) or np.isnan(hd95_val)):
+                    metric_i.append((dice_val, hd95_val))
+                    valid_mask.append(True)
+                else:
+                    metric_i.append((0.0, 0.0))
+                    valid_mask.append(False)
+            except Exception:
+                metric_i.append((0.0, 0.0))
                 valid_mask.append(False)
+        else:
+            metric_i.append((0.0, 0.0))
+            valid_mask.append(False)
+
 
         metric_i = np.array(metric_i, dtype=np.float32)
 
