@@ -23,11 +23,10 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     """
     Unified inference & evaluation with optional visualization.
-    Uses valid_mask logic to ignore empty cases (same as newer version).
     """
     model.eval()
     metric_sum = None
-    metric_counts = None
+    metric_counts = None  # track valid counts per class
 
     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
         image = sampled_batch["image"].to(DEVICE)   # (1, C, D, H, W)
@@ -48,32 +47,28 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         valid_mask = []
         for c in range(1, args.num_classes):  # skip background
             dice_hd = calculate_metric_percase(
-            (prediction_np == c).astype(np.uint8),
-            (label_np == c).astype(np.uint8)
+                (prediction_np == c).astype(np.uint8),
+                (label_np == c).astype(np.uint8)
             )
 
-        # Ensure it's a tuple of floats (or None handled)
-        if dice_hd is not None:
-            try:
-                dice_val, hd95_val = map(float, dice_hd)
-                if not (np.isnan(dice_val) or np.isnan(hd95_val)):
-                    metric_i.append((dice_val, hd95_val))
-                    valid_mask.append(True)
-                else:
-                    metric_i.append((0.0, 0.0))
-                    valid_mask.append(False)
-            except Exception:
-                metric_i.append((0.0, 0.0))
-                valid_mask.append(False)
-        else:
+            if dice_hd is not None:
+                try:
+                    dice_val, hd95_val = map(float, dice_hd)
+                    if not (np.isnan(dice_val) or np.isnan(hd95_val)):
+                        metric_i.append((dice_val, hd95_val))
+                        valid_mask.append(True)
+                        continue
+                except Exception:
+                    pass
+
+            # fallback if invalid
             metric_i.append((0.0, 0.0))
             valid_mask.append(False)
 
-
-        metric_i = np.array(metric_i, dtype=np.float32)
+        metric_i = np.array(metric_i)
 
         if metric_sum is None:
-            metric_sum = np.zeros_like(metric_i, dtype=float)  # (num_classes-1, 2)
+            metric_sum = np.zeros_like(metric_i, dtype=float)
             metric_counts = np.zeros((args.num_classes - 1,), dtype=int)
 
         # accumulate only valid metrics
@@ -82,16 +77,14 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
                 metric_sum[j] += metric_i[j]
                 metric_counts[j] += 1
 
-        # Logging per case (average over valid classes only)
+        # Logging per case
         valid_scores = [metric_i[j] for j, v in enumerate(valid_mask) if v]
         if valid_scores:
             mean_dice_case = np.mean([d for d, _ in valid_scores])
             mean_hd95_case = np.mean([h for _, h in valid_scores])
             print(f"[{i_batch}] {case_name}: Dice={mean_dice_case:.4f}, HD95={mean_hd95_case:.4f}")
-        else:
-            print(f"[{i_batch}] {case_name}: skipped (no valid classes)")
 
-        # Visualization (optional, single slice per case)
+        # Visualization (optional)
         if visualize:
             slice_idx = random.randint(0, prediction_np.shape[0] - 1)  # random slice
             modality_names = ["T1", "T1ce", "T2", "FLAIR"]
@@ -131,9 +124,10 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         if metric_counts[j] > 0:
             metric_mean.append(metric_sum[j] / metric_counts[j])
         else:
-            metric_mean.append((0.0, 0.0))  # no valid cases for this class
+            metric_mean.append((0.0, 0.0))
     metric_mean = np.array(metric_mean)
 
+    # Class names
     class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
         i: f"class{i}" for i in range(1, args.num_classes)
     }
@@ -143,46 +137,8 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         dice_i, hd95_i = metric_mean[i-1]
         print(f"{class_names[i]}: Dice={dice_i:.4f}, HD95={hd95_i:.4f}")
 
-    # mean over valid classes only
     performance = np.mean([m[0] for m in metric_mean if m[0] > 0]) if any(m[0] > 0 for m in metric_mean) else 0
     mean_hd95 = np.mean([m[1] for m in metric_mean if m[1] > 0]) if any(m[1] > 0 for m in metric_mean) else 0
     print(f"Mean Dice: {performance:.4f}, Mean HD95: {mean_hd95:.4f}")
 
     return performance, mean_hd95
-
-
-# -------------------------------
-# 🔹 Main
-# -------------------------------
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--output_dir', type=str,
-                        default='/content/drive/MyDrive/outputs/evaluation', help='root dir for output log')
-    parser.add_argument('--model_name', type=str,
-                        default='BEFUnet3D')
-    parser.add_argument('--root_path', type=str,
-                        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
-                        help='root dir for training data')
-    parser.add_argument('--model_path', type=str,
-                        default='/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_best.pth')
-    parser.add_argument('--num_classes', type=int, default=4)
-    parser.add_argument('--visualize', action='store_true', help='save sample visualizations')
-    args = parser.parse_args()
-
-    args.output_dir = os.path.join(args.output_dir, args.model_name)
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    # Load configs & data
-    CONFIGS = {'BEFUnet3D': configs.get_BEFUnet_configs()}
-    _, test_loader = get_train_val_loaders(args.root_path, batch_size=1)
-
-    # Load model
-    model = BEFUnet3D(
-        config=CONFIGS['BEFUnet3D'],
-        n_classes=args.num_classes).to(DEVICE)
-    checkpoint = torch.load(args.model_path, map_location=DEVICE)
-    model.load_state_dict(checkpoint["model_state"])
-    print("✅ Loaded trained model.")
-
-    # Run evaluation
-    inference_3d(model, test_loader, args, test_save_path=args.output_dir, visualize=args.visualize)
