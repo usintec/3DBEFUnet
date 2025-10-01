@@ -221,8 +221,8 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance =  0.411796
-    patience = getattr(args, "patience", 10)  # 🔑 stop if no improvement for N evals
+    best_performance =  0.229044 #0.411796
+    patience = getattr(args, "patience", 20)  # 🔑 stop if no improvement for N evals
     counter = 0
 
     dice_hist, hd95_hist = [], []
