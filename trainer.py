@@ -299,7 +299,7 @@ def trainer_3d(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
 
-    class_weights = torch.tensor([1.0, 3.0, 3.0, 4.0]).to(device)
+    class_weights = torch.tensor([1.0, 2.0, 2.0, 4.0]).to(device)
     ce_loss = CrossEntropyLoss(weight=class_weights)
     dice_loss = DiceLoss(num_classes)
     from models.Losses import ClassWiseDiscriminativeLoss
@@ -320,7 +320,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance = 0.467553
+    best_performance = 0.469227
     patience = getattr(args, "patience", 20)  # 🔑 stop if no improvement for N evals
     counter = 0
 
@@ -343,7 +343,7 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = (0.05 * loss_ce) + (0.92 * loss_dice) + (0.03 * loss_dlf)
+                        loss = (0.3 * loss_ce) + (0.7 * loss_dice) + (0.1 * loss_dlf)
                     else:
                         loss = None
 
