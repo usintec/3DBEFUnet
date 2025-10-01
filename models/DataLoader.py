@@ -222,7 +222,7 @@ def get_train_val_loaders(data_dir, batch_size=2, target_shape=(96,96,96)):
 
     return train_loader, val_loader
 
-def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.7, et_ratio=0.3):
+def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.6, et_ratio=0.4):
     """
     Crop a 3D subvolume around tumor (with probability tumor_ratio).
     Prioritize ET voxels with probability et_ratio.

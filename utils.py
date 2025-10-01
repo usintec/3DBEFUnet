@@ -581,44 +581,86 @@ from scipy.ndimage import zoom
 import torch.nn as nn
 import SimpleITK as sitk
 
-
 class DiceLoss(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, weight=None, ignore_background=True):
         super(DiceLoss, self).__init__()
         self.n_classes = n_classes
+        self.weight = weight if weight is not None else [1.0] * n_classes
+        self.ignore_background = ignore_background
 
     def _one_hot_encoder(self, input_tensor):
+        # Expand labels to one-hot: (B, D, H, W) → (B, C, D, H, W)
         tensor_list = []
         for i in range(self.n_classes):
-            temp_prob = input_tensor == i  # * torch.ones_like(input_tensor)
-            tensor_list.append(temp_prob.unsqueeze(1))
-        output_tensor = torch.cat(tensor_list, dim=1)
-        return output_tensor.float()
+            tensor_list.append((input_tensor == i).unsqueeze(1))
+        return torch.cat(tensor_list, dim=1).float()
 
-    def _dice_loss(self, score, target):
-        target = target.float()
-        smooth = 1e-5
-        intersect = torch.sum(score * target)
-        y_sum = torch.sum(target * target)
-        z_sum = torch.sum(score * score)
-        loss = (2 * intersect + smooth) / (z_sum + y_sum + smooth)
-        loss = 1 - loss
-        return loss
-
-    def forward(self, inputs, target, weight=None, softmax=False):
+    def forward(self, inputs, target, softmax=True):
         if softmax:
-            inputs = torch.softmax(inputs, dim=1)
-        target = self._one_hot_encoder(target)
-        if weight is None:
-            weight = [1] * self.n_classes
-        assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
-        class_wise_dice = []
+            inputs = torch.softmax(inputs, dim=1)  # (B, C, D, H, W)
+
+        target = self._one_hot_encoder(target)    # (B, C, D, H, W)
+        assert inputs.size() == target.size(), \
+            f"predict {inputs.size()} & target {target.size()} shape mismatch"
+
+        smooth = 1e-5
         loss = 0.0
-        for i in range(0, self.n_classes):
-            dice = self._dice_loss(inputs[:, i], target[:, i])
-            class_wise_dice.append(1.0 - dice.item())
-            loss += dice * weight[i]
-        return loss / self.n_classes
+        num_classes_used = 0
+
+        for i in range(self.n_classes):
+            if self.ignore_background and i == 0:
+                continue
+            input_i = inputs[:, i]
+            target_i = target[:, i]
+
+            intersect = torch.sum(input_i * target_i)
+            denominator = torch.sum(input_i) + torch.sum(target_i)
+
+            dice_score = (2.0 * intersect + smooth) / (denominator + smooth)
+            dice_loss = 1.0 - dice_score
+
+            loss += dice_loss * self.weight[i]
+            num_classes_used += 1
+
+        return loss / num_classes_used
+
+# class DiceLoss(nn.Module):
+#     def __init__(self, n_classes):
+#         super(DiceLoss, self).__init__()
+#         self.n_classes = n_classes
+
+#     def _one_hot_encoder(self, input_tensor):
+#         tensor_list = []
+#         for i in range(self.n_classes):
+#             temp_prob = input_tensor == i  # * torch.ones_like(input_tensor)
+#             tensor_list.append(temp_prob.unsqueeze(1))
+#         output_tensor = torch.cat(tensor_list, dim=1)
+#         return output_tensor.float()
+
+#     def _dice_loss(self, score, target):
+#         target = target.float()
+#         smooth = 1e-5
+#         intersect = torch.sum(score * target)
+#         y_sum = torch.sum(target * target)
+#         z_sum = torch.sum(score * score)
+#         loss = (2 * intersect + smooth) / (z_sum + y_sum + smooth)
+#         loss = 1 - loss
+#         return loss
+
+#     def forward(self, inputs, target, weight=None, softmax=False):
+#         if softmax:
+#             inputs = torch.softmax(inputs, dim=1)
+#         target = self._one_hot_encoder(target)
+#         if weight is None:
+#             weight = [1] * self.n_classes
+#         assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
+#         class_wise_dice = []
+#         loss = 0.0
+#         for i in range(0, self.n_classes):
+#             dice = self._dice_loss(inputs[:, i], target[:, i])
+#             class_wise_dice.append(1.0 - dice.item())
+#             loss += dice * weight[i]
+#         return loss / self.n_classes
 
 
 # def calculate_metric_percase(pred, gt):

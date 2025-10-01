@@ -299,7 +299,7 @@ def trainer_3d(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
 
-    class_weights = torch.tensor([1.0, 2.0, 2.0, 3.0]).to(device)
+    class_weights = torch.tensor([1.0, 3.0, 3.0, 4.0]).to(device)
     ce_loss = CrossEntropyLoss(weight=class_weights)
     dice_loss = DiceLoss(num_classes)
     from models.Losses import ClassWiseDiscriminativeLoss
@@ -311,9 +311,8 @@ def trainer_3d(args, model, snapshot_path):
 
 
     optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max_iterations, eta_min=1e-6
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iterations, eta_min=1e-6)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2, min_lr=1e-7)
     writer = SummaryWriter(os.path.join(snapshot_path, 'log'))
     scaler = torch.cuda.amp.GradScaler(enabled=True)
 
@@ -321,7 +320,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance =  0.462852
+    best_performance =   0.464038
     patience = getattr(args, "patience", 20)  # 🔑 stop if no improvement for N evals
     counter = 0
 
