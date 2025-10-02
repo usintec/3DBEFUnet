@@ -1,79 +1,9 @@
-iter14750
-📊 Final Evaluation Results
-ET: Dice=0.3219, HD95=5.0994
-TC: Dice=0.3649, HD95=8.7215
-WT: Dice=0.4533, HD95=7.3291
-Mean Dice: 0.3800, Mean HD95: 7.0500
+Mean ET: Dice = 0.3213, HD95 = 6.5841
+Mean TC: Dice = 0.4544, HD95 = 7.3581
+Mean WT: Dice = 0.5167, HD95 = 7.1247
+Testing performance (best-val model) mean dice: 0.4307841268306463: mean HD95  7.022271961230317: %f
 
-Mean ET: Dice = 0.3219, HD95 = 4.9920
-Mean class 1 mean_dice 0.321881 mean_hd95 4.992027
-Mean TC: Dice = 0.3645, HD95 = 8.6012
-Mean class 2 mean_dice 0.364544 mean_hd95 8.601151
-Mean WT: Dice = 0.4529, HD95 = 7.3537
-Mean class 3 mean_dice 0.452945 mean_hd95 7.353685
-Testing performance (best-val model): mean_dice: 0.379790  mean_hd95: 6.982288
-
-iter14800
-ET: Dice=0.2563, HD95=6.0732
-TC: Dice=0.4553, HD95=7.8928
-WT: Dice=0.4507, HD95=8.5217
-Mean Dice: 0.3874, Mean HD95: 7.4959
-
-iter14850
-ET: Dice=0.2330, HD95=9.1116
-TC: Dice=0.4555, HD95=9.4072
-WT: Dice=0.4334, HD95=13.6527
-Mean Dice: 0.3740, Mean HD95: 10.7238
-
-iter14900
-ET: Dice=0.2571, HD95=6.2147
-TC: Dice=0.4583, HD95=7.1103
-WT: Dice=0.4449, HD95=11.0209
-Mean Dice: 0.3868, Mean HD95: 8.1153
-
-iter14950
-ET: Dice=0.2832, HD95=5.9263
-TC: Dice=0.4396, HD95=7.6621
-WT: Dice=0.4396, HD95=5.8716
-Mean Dice: 0.3875, Mean HD95: 6.4867
-
-BEFUnet3D_iter15000
-ET: Dice=0.2663, HD95=6.2512
-TC: Dice=0.4635, HD95=6.8514
-WT: Dice=0.4547, HD95=7.1726
-Mean Dice: 0.3949, Mean HD95: 6.7584
-
-BEFUnet3D_iter15050
-ET: Dice=0.2538, HD95=6.5591
-TC: Dice=0.4530, HD95=6.9633
-WT: Dice=0.4628, HD95=8.6229
-Mean Dice: 0.3898, Mean HD95: 7.3818
-
-BEFUnet3D_best
-ET: Dice=0.2806, HD95=6.2588
-TC: Dice=0.4260, HD95=7.6291
-WT: Dice=0.4378, HD95=8.9621
-Mean Dice: 0.3814, Mean HD95: 7.6166
-
-Mean ET: Dice = 0.3407, HD95 = 5.2647
-Mean TC: Dice = 0.5215, HD95 = 6.3076
-Mean WT: Dice = 0.5239, HD95 = 6.7101
-Testing performance (best-val model): mean_dice: 0.462042  mean_hd95: 6.094137
-New best Dice = 0.4620 at epoch 90
-
-Mean ET: Dice = 0.3403, HD95 = 5.3759
-Mean TC: Dice = 0.5264, HD95 = 6.0127
-Mean WT: Dice = 0.5218, HD95 = 6.7870
-Testing performance (best-val model): mean_dice: 0.462852  mean_hd95: 6.058554
-New best Dice = 0.4629 at epoch 92
-
-Mean ET: Dice = 0.3526, HD95 = 5.1589
-Mean TC: Dice = 0.5154, HD95 = 6.0128
-Mean WT: Dice = 0.5397, HD95 = 7.0678
-Testing performance (best-val model): mean_dice: 0.469227  mean_hd95: 6.079823
-New best Dice = 0.4692 at epoch 110
-
-
-Mean ET: Dice = 0.3083, HD95 = 6.5247
-Mean TC: Dice = 0.4511, HD95 = 8.4101
-Mean WT: Dice = 0.5165, HD95 = 5.6296
+Mean ET: Dice = 0.3215, HD95 = 6.5709
+Mean TC: Dice = 0.4545, HD95 = 7.3528
+Mean WT: Dice = 0.5175, HD95 = 7.1519
+Testing performance (best-val model) mean dice: 0.43116502376854565: mean HD95  7.025208400172709: %f
