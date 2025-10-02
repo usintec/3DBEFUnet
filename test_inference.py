@@ -96,13 +96,13 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     }
 
     for i in range(1, args.num_classes):
-        logging.info(
+        print(
             f"Mean {class_names[i]}: Dice = {metric_mean[i-1][0]:.4f}, HD95 = {metric_mean[i-1][1]:.4f}"
         )
 
     performance = np.mean([m[0] for m in metric_mean if m[0] > 0]) if any(m[0] > 0 for m in metric_mean) else 0
     mean_hd95 = np.mean([m[1] for m in metric_mean if m[1] > 0]) if any(m[1] > 0 for m in metric_mean) else 0
-    logging.info('Testing performance (best-val model): mean_dice: %f  mean_hd95: %f',
+    print(f"Testing performance (best-val model): {performance}: %f  {mean_hd95}: %f",
                  performance, mean_hd95)
 
     return performance, mean_hd95
