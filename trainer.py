@@ -27,8 +27,8 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     metric_counts = {c: 0 for c in range(1, args.num_classes)}
 
     # Import MSC module
-    from models.Clustering import MeanShiftClustering
-    msc = MeanShiftClustering(bandwidth=0.5)
+    # from models.Clustering import MeanShiftClustering
+    # msc = MeanShiftClustering(bandwidth=0.5)
 
     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
         image = sampled_batch["image"].cuda(non_blocking=True)   # (1, C, D, H, W)
@@ -39,8 +39,8 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         seg_logits, embeddings, _ = model(image)
 
         # Optionally refine with MSC
-        if apply_msc:
-            seg_logits = msc(embeddings, seg_logits)
+        # if apply_msc:
+        #     seg_logits = msc(embeddings, seg_logits)
 
         # Prediction
         pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
@@ -345,7 +345,7 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = (0.4 * loss_ce) + (0.6 * loss_dice) + (0.1 * loss_dlf)
+                        loss = (0.2 * loss_ce) + (0.8 * loss_dice)
                     else:
                         loss = None
 
