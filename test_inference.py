@@ -30,6 +30,11 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     metric_sum = {c: np.array([0.0, 0.0]) for c in range(1, args.num_classes)}
     metric_counts = {c: 0 for c in range(1, args.num_classes)}
 
+    # Class names
+    class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
+        i: f"class{i}" for i in range(1, args.num_classes)
+    }
+
     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
         image = sampled_batch["image"].to(DEVICE)   # (1, C, D, H, W)
         label = sampled_batch["label"].to(DEVICE)   # (1, D, H, W)
@@ -47,19 +52,13 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         # ✅ Get per-class metrics as dict
         metrics_dict = calculate_metric_percase(prediction_np, label_np, num_classes=args.num_classes)
 
-        # Accumulate results
+        # Accumulate results + print per-class metrics for this case
         for c in range(1, args.num_classes):
             dice, hd95 = metrics_dict[c]
             if dice is not None:   # valid case
                 metric_sum[c] += np.array([dice, hd95])
                 metric_counts[c] += 1
-
-        # Accumulate results
-        for c in range(1, args.num_classes):
-            dice, hd95 = metrics_dict[c]
-            if dice is not None:   # valid case
-                metric_sum[c] += np.array([dice, hd95])
-                metric_counts[c] += 1
+                print(f"[Case {case_name}] {class_names[c]} -> Dice: {dice:.4f}, HD95: {hd95:.4f}")
 
         # Per-case logging (mean across valid classes)
         valid_scores = [(d, h) for (d, h) in [metrics_dict[c] for c in range(1, args.num_classes)] if d is not None]
@@ -81,13 +80,10 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         else:
             metric_mean[c] = (0.0, 0.0)
 
-    # Class names
-    class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
-        i: f"class{i}" for i in range(1, args.num_classes)
-    }
-
+    # ✅ Print/log per-class average metrics
     for c in range(1, args.num_classes):
         dice, hd95 = metric_mean[c]
+        print(f"[Overall Mean] {class_names[c]} -> Dice: {dice:.4f}, HD95: {hd95:.4f}")
         logging.info(
             f"Mean {class_names[c]}: Dice = {dice:.4f}, HD95 = {hd95:.4f}"
         )
@@ -103,6 +99,7 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
                  performance, mean_hd95)
 
     return performance, mean_hd95
+
        
 # -------------------------------
 # 🔹 Main
