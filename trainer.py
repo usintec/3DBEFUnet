@@ -20,15 +20,11 @@ from utils import calculate_metric_percase
 @torch.no_grad()
 def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
     """
-    3D inference over whole volumes. Expects batch size == 1 from testloader.
-    testloader must yield dicts with keys: 
-      'image': (1,C,D,H,W), 
-      'label': (1,D,H,W), 
-      'case_name': [str]
+    3D inference over whole volumes with per-class BraTS-style metrics (ET, TC, WT).
     """
     model.eval()
-    metric_sum = None   # accumulate per-class metrics (dice, hd95)
-    metric_counts = None  # track how many valid cases per class
+    metric_sum = {c: np.array([0.0, 0.0]) for c in range(1, args.num_classes)}
+    metric_counts = {c: 0 for c in range(1, args.num_classes)}
 
     # Import MSC module
     from models.Clustering import MeanShiftClustering
@@ -53,35 +49,18 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         prediction_np = pred.squeeze(0).cpu().numpy()
         label_np = label.squeeze(0).cpu().numpy()
 
-        # Per-class metrics
-        metric_i = []
-        valid_mask = []
+        # ✅ Get per-class metrics as dict
+        metrics_dict = calculate_metric_percase(prediction_np, label_np, num_classes=args.num_classes)
+
+        # Accumulate results
         for c in range(1, args.num_classes):
-            dice_hd = calculate_metric_percase(
-                (prediction_np == c).astype(np.uint8),
-                (label_np == c).astype(np.uint8)
-            )
-            if dice_hd[0] is not None:  # valid case
-                metric_i.append(dice_hd)
-                valid_mask.append(True)
-            else:
-                metric_i.append((0, 0))   # placeholder, won’t count in averaging
-                valid_mask.append(False)
+            dice, hd95 = metrics_dict[c]
+            if dice is not None:   # valid case
+                metric_sum[c] += np.array([dice, hd95])
+                metric_counts[c] += 1
 
-        metric_i = np.array(metric_i)
-
-        if metric_sum is None:
-            metric_sum = np.zeros_like(metric_i, dtype=float)
-            metric_counts = np.zeros((args.num_classes - 1,), dtype=int)
-
-        # accumulate only valid metrics
-        for j, valid in enumerate(valid_mask):
-            if valid:
-                metric_sum[j] += metric_i[j]
-                metric_counts[j] += 1
-
-        # Logging per-case (only over valid classes)
-        valid_scores = [metric_i[j] for j, v in enumerate(valid_mask) if v]
+        # Per-case logging (mean across valid classes)
+        valid_scores = [(d, h) for (d, h) in [metrics_dict[c] for c in range(1, args.num_classes)] if d is not None]
         if valid_scores:
             mean_dice_case = np.mean([d for d, _ in valid_scores])
             mean_hd95_case = np.mean([h for _, h in valid_scores])
@@ -92,31 +71,136 @@ def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
         if test_save_path is not None:
             pass
 
-    # Compute averages per class (avoid divide-by-zero)
-    metric_mean = []
-    for j in range(args.num_classes - 1):
-        if metric_counts[j] > 0:
-            metric_mean.append(metric_sum[j] / metric_counts[j])
+    # Compute averages per class
+    metric_mean = {}
+    for c in range(1, args.num_classes):
+        if metric_counts[c] > 0:
+            metric_mean[c] = metric_sum[c] / metric_counts[c]
         else:
-            metric_mean.append((0, 0))
-    metric_mean = np.array(metric_mean)
+            metric_mean[c] = (0.0, 0.0)
 
     # Class names
     class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
         i: f"class{i}" for i in range(1, args.num_classes)
     }
 
-    for i in range(1, args.num_classes):
+    for c in range(1, args.num_classes):
+        dice, hd95 = metric_mean[c]
         logging.info(
-            f"Mean {class_names[i]}: Dice = {metric_mean[i-1][0]:.4f}, HD95 = {metric_mean[i-1][1]:.4f}"
+            f"Mean {class_names[c]}: Dice = {dice:.4f}, HD95 = {hd95:.4f}"
         )
 
-    performance = np.mean([m[0] for m in metric_mean if m[0] > 0]) if any(m[0] > 0 for m in metric_mean) else 0
-    mean_hd95 = np.mean([m[1] for m in metric_mean if m[1] > 0]) if any(m[1] > 0 for m in metric_mean) else 0
+    # Overall averages (BraTS style = mean across ET, TC, WT)
+    dices = [metric_mean[c][0] for c in range(1, args.num_classes) if metric_counts[c] > 0]
+    hd95s = [metric_mean[c][1] for c in range(1, args.num_classes) if metric_counts[c] > 0]
+
+    performance = np.mean(dices) if dices else 0
+    mean_hd95 = np.mean(hd95s) if hd95s else 0
+
     logging.info('Testing performance (best-val model): mean_dice: %f  mean_hd95: %f',
                  performance, mean_hd95)
 
     return performance, mean_hd95
+
+# def inference_3d(model, testloader, args, test_save_path=None, apply_msc=False):
+#     """
+#     3D inference over whole volumes. Expects batch size == 1 from testloader.
+#     testloader must yield dicts with keys: 
+#       'image': (1,C,D,H,W), 
+#       'label': (1,D,H,W), 
+#       'case_name': [str]
+#     """
+#     model.eval()
+#     metric_sum = None   # accumulate per-class metrics (dice, hd95)
+#     metric_counts = None  # track how many valid cases per class
+
+#     # Import MSC module
+#     from models.Clustering import MeanShiftClustering
+#     msc = MeanShiftClustering(bandwidth=0.5)
+
+#     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
+#         image = sampled_batch["image"].cuda(non_blocking=True)   # (1, C, D, H, W)
+#         label = sampled_batch["label"].cuda(non_blocking=True)   # (1, D, H, W)
+#         case_name = sampled_batch['case_name'][0]
+
+#         # Forward pass
+#         seg_logits, embeddings, _ = model(image)
+
+#         # Optionally refine with MSC
+#         if apply_msc:
+#             seg_logits = msc(embeddings, seg_logits)
+
+#         # Prediction
+#         pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
+
+#         # Convert to numpy
+#         prediction_np = pred.squeeze(0).cpu().numpy()
+#         label_np = label.squeeze(0).cpu().numpy()
+
+#         # Per-class metrics
+#         metric_i = []
+#         valid_mask = []
+#         for c in range(1, args.num_classes):
+#             dice_hd = calculate_metric_percase(
+#                 (prediction_np == c).astype(np.uint8),
+#                 (label_np == c).astype(np.uint8)
+#             )
+#             if dice_hd[0] is not None:  # valid case
+#                 metric_i.append(dice_hd)
+#                 valid_mask.append(True)
+#             else:
+#                 metric_i.append((0, 0))   # placeholder, won’t count in averaging
+#                 valid_mask.append(False)
+
+#         metric_i = np.array(metric_i)
+
+#         if metric_sum is None:
+#             metric_sum = np.zeros_like(metric_i, dtype=float)
+#             metric_counts = np.zeros((args.num_classes - 1,), dtype=int)
+
+#         # accumulate only valid metrics
+#         for j, valid in enumerate(valid_mask):
+#             if valid:
+#                 metric_sum[j] += metric_i[j]
+#                 metric_counts[j] += 1
+
+#         # Logging per-case (only over valid classes)
+#         valid_scores = [metric_i[j] for j, v in enumerate(valid_mask) if v]
+#         if valid_scores:
+#             mean_dice_case = np.mean([d for d, _ in valid_scores])
+#             mean_hd95_case = np.mean([h for _, h in valid_scores])
+#             logging.info(' idx %d case %s mean_dice %f mean_hd95 %f',
+#                          i_batch, case_name, mean_dice_case, mean_hd95_case)
+
+#         # Optional save
+#         if test_save_path is not None:
+#             pass
+
+#     # Compute averages per class (avoid divide-by-zero)
+#     metric_mean = []
+#     for j in range(args.num_classes - 1):
+#         if metric_counts[j] > 0:
+#             metric_mean.append(metric_sum[j] / metric_counts[j])
+#         else:
+#             metric_mean.append((0, 0))
+#     metric_mean = np.array(metric_mean)
+
+#     # Class names
+#     class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
+#         i: f"class{i}" for i in range(1, args.num_classes)
+#     }
+
+#     for i in range(1, args.num_classes):
+#         logging.info(
+#             f"Mean {class_names[i]}: Dice = {metric_mean[i-1][0]:.4f}, HD95 = {metric_mean[i-1][1]:.4f}"
+#         )
+
+#     performance = np.mean([m[0] for m in metric_mean if m[0] > 0]) if any(m[0] > 0 for m in metric_mean) else 0
+#     mean_hd95 = np.mean([m[1] for m in metric_mean if m[1] > 0]) if any(m[1] > 0 for m in metric_mean) else 0
+#     logging.info('Testing performance (best-val model): mean_dice: %f  mean_hd95: %f',
+#                  performance, mean_hd95)
+
+#     return performance, mean_hd95
 
 def plot_result(dice, h, snapshot_path, args):
     data = {'mean_dice': dice, 'mean_hd95': h}
