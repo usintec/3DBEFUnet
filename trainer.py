@@ -238,7 +238,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance = 0.43116 #0.469227 0.4249
+    best_performance = 6.4024
     patience = getattr(args, "patience", 20)  # 🔑 stop if no improvement for N evals
     counter = 0
 
@@ -261,7 +261,7 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = (0.4 * loss_ce) + (0.5 * loss_dice) + (0.1 * loss_dlf)
+                        loss = (0.4 * loss_ce) + (0.6 * loss_dice) + (0.1 * loss_dlf)
                     else:
                         loss = None
 
@@ -345,10 +345,10 @@ def trainer_3d(args, model, snapshot_path):
             dice_hist.append(mean_dice)
             hd95_hist.append(mean_hd95)
 
-            if mean_dice > best_performance:
-                best_performance = mean_dice
+            if mean_hd95 < best_performance:
+                best_performance = mean_hd95
                 counter = 0  # reset patience
-                logging.info("New best Dice = %.4f at epoch %d", mean_dice, epoch_num)
+                logging.info("New best Dice = %.4f at epoch %d", mean_hd95, epoch_num)
 
                 # 🔑 Save best model
                 save_checkpoint(

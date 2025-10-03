@@ -674,19 +674,44 @@ class DiceLoss(nn.Module):
 #         return 1, 0
 #     else:
 #         return 0, 0
-def calculate_metric_percase(pred, gt):
-    pred[pred > 0] = 1
-    gt[gt > 0] = 1
-    if pred.sum() > 0 and gt.sum() > 0:
-        dice = metric.binary.dc(pred, gt)
-        hd95 = metric.binary.hd95(pred, gt)
-        return dice, hd95
-    elif pred.sum() == 0 and gt.sum() == 0:
-        # Both empty -> perfect (no tumor, no prediction)
-        return 1, 0
-    else:
-        # One empty, one not -> skip this case in averaging
-        return None, None
+import numpy as np
+from medpy import metric
+
+def calculate_metric_percase(pred, gt, num_classes=4):
+    """
+    pred, gt: 3D numpy arrays with shape (D, H, W)
+    num_classes: including background (0=background, 1=ET, 2=TC, 3=WT)
+    
+    Returns: dict {class_id: (dice, hd95)}
+    """
+    results = {}
+    for cls in range(1, num_classes):  # skip background
+        pred_i = (pred == cls).astype(np.uint8)
+        gt_i   = (gt == cls).astype(np.uint8)
+
+        if pred_i.sum() > 0 and gt_i.sum() > 0:
+            dice = metric.binary.dc(pred_i, gt_i)
+            hd95 = metric.binary.hd95(pred_i, gt_i)
+            results[cls] = (dice, hd95)
+        elif pred_i.sum() == 0 and gt_i.sum() == 0:
+            results[cls] = (1.0, 0.0)  # perfect empty case
+        else:
+            results[cls] = (0.0, np.inf)  # one empty, one not
+    return results
+
+# def calculate_metric_percase(pred, gt):
+#     pred[pred > 0] = 1
+#     gt[gt > 0] = 1
+#     if pred.sum() > 0 and gt.sum() > 0:
+#         dice = metric.binary.dc(pred, gt)
+#         hd95 = metric.binary.hd95(pred, gt)
+#         return dice, hd95
+#     elif pred.sum() == 0 and gt.sum() == 0:
+#         # Both empty -> perfect (no tumor, no prediction)
+#         return 1, 0
+#     else:
+#         # One empty, one not -> skip this case in averaging
+#         return None, None
 
 
 
