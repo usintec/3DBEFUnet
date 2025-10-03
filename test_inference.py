@@ -55,22 +55,22 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         # Accumulate results + print per-class metrics for this case
         for c in range(1, args.num_classes):
             dice, hd95 = metrics_dict[c]
-            if dice is not None:   # valid case
+
+            if dice is not None and not np.isinf(hd95):  # ✅ ignore inf values
                 metric_sum[c] += np.array([dice, hd95])
                 metric_counts[c] += 1
                 print(f"[Case {case_name}] {class_names[c]} -> Dice: {dice:.4f}, HD95: {hd95:.4f}")
+            else:
+                print(f"[Case {case_name}] {class_names[c]} -> skipped (invalid metric: Dice={dice}, HD95={hd95})")
 
         # Per-case logging (mean across valid classes)
-        valid_scores = [(d, h) for (d, h) in [metrics_dict[c] for c in range(1, args.num_classes)] if d is not None]
+        valid_scores = [(d, h) for (d, h) in [metrics_dict[c] for c in range(1, args.num_classes)]
+                        if d is not None and not np.isinf(h)]
         if valid_scores:
             mean_dice_case = np.mean([d for d, _ in valid_scores])
             mean_hd95_case = np.mean([h for _, h in valid_scores])
             logging.info(' idx %d case %s mean_dice %f mean_hd95 %f',
                          i_batch, case_name, mean_dice_case, mean_hd95_case)
-
-        # Optional save
-        if test_save_path is not None:
-            pass
 
     # Compute averages per class
     metric_mean = {}
@@ -84,9 +84,7 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     for c in range(1, args.num_classes):
         dice, hd95 = metric_mean[c]
         print(f"[Overall Mean] {class_names[c]} -> Dice: {dice:.4f}, HD95: {hd95:.4f}")
-        logging.info(
-            f"Mean {class_names[c]}: Dice = {dice:.4f}, HD95 = {hd95:.4f}"
-        )
+        logging.info(f"Mean {class_names[c]}: Dice = {dice:.4f}, HD95 = {hd95:.4f}")
 
     # Overall averages (BraTS style = mean across ET, TC, WT)
     dices = [metric_mean[c][0] for c in range(1, args.num_classes) if metric_counts[c] > 0]
@@ -99,6 +97,7 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
                  performance, mean_hd95)
 
     return performance, mean_hd95
+
 
        
 # -------------------------------
