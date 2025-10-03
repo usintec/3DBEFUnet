@@ -25,8 +25,10 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     Unified inference & evaluation with optional visualization.
     """
     model.eval()
-    metric_sum = None
-    metric_counts = None  # track valid counts per class
+    
+    # ✅ initialize metric containers
+    metric_sum = {c: np.array([0.0, 0.0]) for c in range(1, args.num_classes)}
+    metric_counts = {c: 0 for c in range(1, args.num_classes)}
 
     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
         image = sampled_batch["image"].to(DEVICE)   # (1, C, D, H, W)
@@ -42,9 +44,15 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         prediction_np = pred.squeeze(0).cpu().numpy()
         label_np = label.squeeze(0).cpu().numpy()
 
-        
         # ✅ Get per-class metrics as dict
         metrics_dict = calculate_metric_percase(prediction_np, label_np, num_classes=args.num_classes)
+
+        # Accumulate results
+        for c in range(1, args.num_classes):
+            dice, hd95 = metrics_dict[c]
+            if dice is not None:   # valid case
+                metric_sum[c] += np.array([dice, hd95])
+                metric_counts[c] += 1
 
         # Accumulate results
         for c in range(1, args.num_classes):
