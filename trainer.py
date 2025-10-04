@@ -222,7 +222,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance = 0.462614
+    best_performance = 0.473893
     patience = getattr(args, "patience", 20)  # 🔑 stop if no improvement for N evals
     counter = 0
 
@@ -245,7 +245,7 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = (0.3 * loss_ce) + (0.6 * loss_dice) + (0.1 * loss_dlf)
+                        loss = (0.2 * loss_ce) + (0.7 * loss_dice) + (0.1 * loss_dlf)
                     else:
                         loss = None
 
