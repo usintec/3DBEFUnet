@@ -246,7 +246,7 @@ def trainer_3d(args, model, snapshot_path):
 
     writer = SummaryWriter(os.path.join(snapshot_path, "log"))
 
-    best_performance = 0.0
+    best_performance = 0.479687
     patience = getattr(args, "patience", 20)
     counter = 0
 

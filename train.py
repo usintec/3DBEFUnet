@@ -8,7 +8,7 @@ import torch.backends.cudnn as cudnn
 # Import your 3D model + configs + trainer
 from models.BEFUnet import BEFUnet3D
 import configs.BEFUnet_Config as configs
-from trainer import trainer_3d
+from trainerBackup1 import trainer_3d
 
 
 parser = argparse.ArgumentParser()
