@@ -64,7 +64,18 @@ from scipy.ndimage import distance_transform_edt as distance
 #             num_classes_used += 1
 
 #         return total_loss / num_classes_used
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from scipy.ndimage import distance_transform_edt  # ✅ Add this import
+
 class BoundaryLoss(nn.Module):
+    """
+    Boundary Loss for segmentation (Kervadec et al., 2019)
+    Uses Signed Distance Maps (SDMs) to penalize boundary misalignment.
+    """
+
     def __init__(self, num_classes):
         super(BoundaryLoss, self).__init__()
         self.num_classes = num_classes
@@ -81,7 +92,7 @@ class BoundaryLoss(nn.Module):
         sdf = np.zeros_like(mask_np, dtype=np.float32)
 
         for b in range(mask_np.shape[0]):
-            posmask = mask_np[b].astype(np.bool_)
+            posmask = mask_np[b].astype(bool)
             if posmask.any():
                 negmask = ~posmask
                 posdis = distance_transform_edt(negmask)
@@ -91,11 +102,12 @@ class BoundaryLoss(nn.Module):
 
     def forward(self, pred, target):
         """
-        pred: (B, C, H, W, D)
-        target: (B, H, W, D)
+        pred: (B, C, D, H, W)
+        target: (B, D, H, W)
         """
-        device = pred.device  # <-- capture the current device
+        device = pred.device
 
+        # Resize target to match pred shape if necessary
         if pred.shape[2:] != target.shape[1:]:
             target = F.interpolate(target.unsqueeze(1).float(), size=pred.shape[2:], mode='nearest').squeeze(1)
 
@@ -104,14 +116,15 @@ class BoundaryLoss(nn.Module):
 
         with torch.no_grad():
             sdf = torch.stack(
-                [self.compute_sdf(target_onehot[:, c]) for c in range(self.num_classes)], dim=1
-            ).to(device)  # <-- move to same device as pred
+                [self.compute_sdf(target_onehot[:, c]) for c in range(self.num_classes)],
+                dim=1
+            ).to(device)
 
-        # Boundary loss
         multipled = pred_softmax * sdf
         boundary_loss = multipled.abs().mean()
 
         return boundary_loss
+
 class ClassWiseDiscriminativeLoss(nn.Module):
     def __init__(self, delta_var=0.5, delta_dist=1.5,
                  param_var=1.0, param_dist=1.0, param_reg=0.001,
