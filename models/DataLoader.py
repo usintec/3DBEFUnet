@@ -102,7 +102,7 @@ def augment(modalities, seg):
 # =========================
 # Crop Utility
 # =========================
-def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.7, et_ratio=0.3):
+def crop_foreground(modalities, seg, crop_size=(96, 96, 96), tumor_ratio=0.8, et_ratio=0.4):
     """Random tumor-centered crop; fallback to random context crop."""
     H, W, D = seg.shape
     cz, cy, cx = crop_size

@@ -269,11 +269,13 @@ def trainer_3d(args, model, snapshot_path):
                     loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                     # loss_dlf = dlf_loss_fn(embeddings, label_batch)
                     loss_bound = boundary_loss_fn(seg_logits, label_batch)
-                    focal_loss = FocalLoss(gamma=2.0)  # ✅ initialize focal_loss
+                    focal_loss = FocalLoss(gamma=2.0, weight=torch.tensor([0.1, 0.3, 0.3, 0.3]).to(device)) # ✅ initialize focal_loss
                     # Weighted combination
                     # loss = (0.2 * loss_ce) + (0.5 * loss_dice) + (0.2 * loss_dlf) + (0.1 * loss_bound)
                     # Final hybrid loss
-                    loss = 0.4 * loss_dice + 0.4 * focal_loss(seg_logits, label_batch) + 0.2 * loss_bound
+                    # loss = 0.4 * loss_dice + 0.4 * focal_loss(seg_logits, label_batch) + 0.2 * loss_bound
+                    loss = 0.3 * loss_dice + 0.5 * focal_loss(seg_logits, label_batch) + 0.2 * loss_bound
+
                 else:
                     loss = None
 
