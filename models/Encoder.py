@@ -160,20 +160,6 @@ class PyramidFeatures3D(nn.Module):
         else:
             print(f"⚠️ Warning: PiDiNet3D checkpoint not found at {pidinet_ckpt_path} — using random initialization.")
 
-
-        # load PDC weights if path provided
-        # if hasattr(config, "PDC_pretrained_path") and config.PDC_pretrained_path:
-        #     checkpoint_PDC = torch.load(config.PDC_pretrained_path, map_location="cpu")
-        #     state_dict = checkpoint_PDC.get("state_dict", checkpoint_PDC)
-        #     from collections import OrderedDict
-        #     new_state_dict = OrderedDict()
-        #     for k, v in state_dict.items():
-        #         name = k[7:] if k.startswith("module.") else k
-        #         new_state_dict[name] = v
-        #     self.pidinet.load_state_dict(new_state_dict)
-        # else:
-        #     print("Warning: PDC_pretrained_path not found in config — PiDiNet3D will remain randomly initialized.")
-
         # keep the first N layers as in original implementation
         self.pidinet_layers = nn.ModuleList(self.pidinet.children())[:17]
 

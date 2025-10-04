@@ -8,7 +8,7 @@ import logging
 
 import configs.BEFUnet_Config as configs
 from models.BEFUnet import BEFUnet3D
-from models.DataLoader import get_train_val_loaders
+from models.DataLoaderBackup import get_train_val_loaders
 from utils import calculate_metric_percase
 
 # -------------------------------
