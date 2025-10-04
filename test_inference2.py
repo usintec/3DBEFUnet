@@ -99,3 +99,34 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     print(f"🚫 Excluded {len(bad_cases)} bad cases: {bad_cases}")
 
     return performance, mean_hd95
+
+
+# -------------------------------
+# 🔹 Main
+# -------------------------------
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--output_dir', type=str,
+                        default='/content/drive/MyDrive/outputs/evaluation', help='root dir for output log')
+    parser.add_argument('--model_name', type=str, default='BEFUnet3D')
+    parser.add_argument('--root_path', type=str,
+                        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
+                        help='root dir for training data')
+    parser.add_argument('--model_path', type=str,
+                        default='/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_best.pth')
+    parser.add_argument('--num_classes', type=int, default=4)
+    parser.add_argument('--visualize', action='store_true', help='save sample visualizations')
+    args = parser.parse_args()
+
+    args.output_dir = os.path.join(args.output_dir, args.model_name)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    CONFIGS = {'BEFUnet3D': configs.get_BEFUnet_configs()}
+    _, test_loader = get_train_val_loaders(args.root_path, batch_size=1)
+
+    model = BEFUnet3D(config=CONFIGS['BEFUnet3D'], n_classes=args.num_classes).to(DEVICE)
+    checkpoint = torch.load(args.model_path, map_location=DEVICE)
+    model.load_state_dict(checkpoint["model_state"])
+    print("✅ Loaded trained model.")
+
+    inference_3d(model, test_loader, args, test_save_path=args.output_dir, visualize=args.visualize)
