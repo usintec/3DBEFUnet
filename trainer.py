@@ -204,8 +204,9 @@ def trainer_3d(args, model, snapshot_path):
     class_weights = torch.tensor([1.0, 2.0, 2.0, 4.0]).to(device)
     ce_loss = CrossEntropyLoss(weight=class_weights)
     dice_loss = DiceLoss(num_classes)
-    from models.Losses import ClassWiseDiscriminativeLoss
+    from models.Losses import ClassWiseDiscriminativeLoss, BoundaryLoss
     dlf_loss_fn = ClassWiseDiscriminativeLoss(ignore_index=0)
+    boundary_loss_fn = BoundaryLoss(num_classes)
 
     max_epoch = args.max_epochs
     max_iterations = args.max_epochs * len(train_loader)
@@ -222,7 +223,7 @@ def trainer_3d(args, model, snapshot_path):
         model, optimizer, scaler, snapshot_path, device
     )
 
-    best_performance = 0.473893
+    best_performance = 0.479687
     patience = getattr(args, "patience", 20)  # 🔑 stop if no improvement for N evals
     counter = 0
 
@@ -245,7 +246,9 @@ def trainer_3d(args, model, snapshot_path):
                         loss_ce = ce_loss(seg_logits, label_batch.long())
                         loss_dice = dice_loss(seg_logits, label_batch, softmax=True)
                         loss_dlf = dlf_loss_fn(embeddings, label_batch)
-                        loss = (0.2 * loss_ce) + (0.7 * loss_dice) + (0.1 * loss_dlf)
+                        loss_bound = boundary_loss_fn(seg_logits, label_batch)
+                        # 🔹 New weighted combination
+                        loss = (0.2 * loss_ce) + (0.5 * loss_dice) + (0.2 * loss_dlf) + (0.1 * loss_bound)
                     else:
                         loss = None
 
