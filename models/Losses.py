@@ -64,56 +64,6 @@ from scipy.ndimage import distance_transform_edt as distance
 #             num_classes_used += 1
 
 #         return total_loss / num_classes_used
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from scipy.ndimage import distance_transform_edt as distance
-
-def one_hot2dist(seg):
-    """
-    Convert binary segmentation to distance map.
-    """
-    seg = seg.astype(np.bool_)
-    res = np.zeros_like(seg, dtype=np.float32)
-    for c in range(seg.shape[0]):
-        posmask = seg[c].astype(np.bool_)
-        if posmask.any():
-            negmask = ~posmask
-            res[c] = distance(negmask) * negmask - (distance(posmask) - 1) * posmask
-    return res
-
-# class BoundaryLoss(nn.Module):
-#     def __init__(self, num_classes=4):
-#         super(BoundaryLoss, self).__init__()
-#         self.num_classes = num_classes
-
-#     def forward(self, logits, target):
-#         """
-#         logits: (B, C, D, H, W)
-#         target: (B, D, H, W)
-#         """
-#         n, c, d, h, w = logits.shape
-#         target_onehot = F.one_hot(target, num_classes=c).permute(0, 4, 1, 2, 3).float()
-#         probs = F.softmax(logits, dim=1)
-
-#         # Compute distance maps for each target
-#         target_np = target_onehot.cpu().numpy()
-#         dist_maps = np.zeros_like(target_np)
-#         for i in range(n):
-#             dist_maps[i] = one_hot2dist(target_np[i])
-#         dist_maps = torch.from_numpy(dist_maps).to(logits.device)
-
-#         # Multiply probabilities with distance maps (class-wise)
-#         boundary_loss = torch.sum(probs * dist_maps, dim=1)
-#         return boundary_loss.mean()
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from scipy.ndimage import distance_transform_edt
-
 class BoundaryLoss(nn.Module):
     def __init__(self, num_classes):
         super(BoundaryLoss, self).__init__()
@@ -127,11 +77,11 @@ class BoundaryLoss(nn.Module):
 
     def compute_sdf(self, mask):
         """Compute signed distance map for each binary mask"""
-        mask = mask.cpu().numpy().astype(np.uint8)
-        sdf = np.zeros_like(mask, dtype=np.float32)
+        mask_np = mask.cpu().numpy().astype(np.uint8)
+        sdf = np.zeros_like(mask_np, dtype=np.float32)
 
-        for b in range(mask.shape[0]):
-            posmask = mask[b].astype(np.bool_)
+        for b in range(mask_np.shape[0]):
+            posmask = mask_np[b].astype(np.bool_)
             if posmask.any():
                 negmask = ~posmask
                 posdis = distance_transform_edt(negmask)
@@ -141,28 +91,27 @@ class BoundaryLoss(nn.Module):
 
     def forward(self, pred, target):
         """
-        pred: (B, C, H, W, D) — logits
+        pred: (B, C, H, W, D)
         target: (B, H, W, D)
         """
+        device = pred.device  # <-- capture the current device
+
         if pred.shape[2:] != target.shape[1:]:
             target = F.interpolate(target.unsqueeze(1).float(), size=pred.shape[2:], mode='nearest').squeeze(1)
 
-        # One-hot encoding
         target_onehot = self.one_hot_encode(target, self.num_classes)
-
-        # Softmax over classes
         pred_softmax = F.softmax(pred, dim=1)
 
-        # Compute signed distance function for GT
         with torch.no_grad():
-            sdf = torch.stack([self.compute_sdf(target_onehot[:, c]) for c in range(self.num_classes)], dim=1)
+            sdf = torch.stack(
+                [self.compute_sdf(target_onehot[:, c]) for c in range(self.num_classes)], dim=1
+            ).to(device)  # <-- move to same device as pred
 
         # Boundary loss
         multipled = pred_softmax * sdf
         boundary_loss = multipled.abs().mean()
 
         return boundary_loss
-
 class ClassWiseDiscriminativeLoss(nn.Module):
     def __init__(self, delta_var=0.5, delta_dist=1.5,
                  param_var=1.0, param_dist=1.0, param_reg=0.001,
