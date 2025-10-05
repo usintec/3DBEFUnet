@@ -42,6 +42,7 @@ def pixel_accuracy(pred, label):
 # -------------------------------
 @torch.no_grad()
 @torch.no_grad()
+@torch.no_grad()
 def test_single_case(model, testloader, output_dir):
     model.eval()
 
@@ -60,14 +61,27 @@ def test_single_case(model, testloader, output_dir):
     prediction_np = pred.squeeze(0).cpu().numpy()
     label_np = label.squeeze(0).cpu().numpy()
 
-    # Choose a slice that contains tumor (fallback to center if none)
+    # -------------------------------
+    # 🔹 Slice selection logic
+    # -------------------------------
+    preferred_slice = 38
     tumor_slices = np.where(label_np.sum(axis=(1, 2)) > 0)[0]
-    if len(tumor_slices) > 0:
-        slice_idx = random.choice(tumor_slices.tolist())
-    else:
-        slice_idx = prediction_np.shape[0] // 2
 
-    # Extract all 4 modalities and normalize to [0, 1]
+    if preferred_slice < label_np.shape[0] and label_np[preferred_slice].sum() > 0:
+        slice_idx = preferred_slice
+        reason = "used preferred slice 38 (tumor present)"
+    elif len(tumor_slices) > 0:
+        slice_idx = random.choice(tumor_slices.tolist())
+        reason = "used random tumor slice"
+    else:
+        slice_idx = label_np.shape[0] // 2
+        reason = "used middle slice (no tumor found)"
+
+    print(f"🧩 Slice selection for {case_name}: slice {slice_idx} — {reason}")
+
+    # -------------------------------
+    # 🔹 Normalize MRI modalities
+    # -------------------------------
     modality_names = ["T1", "T1ce", "T2", "FLAIR"]
     img_slices = []
     for m in range(image.shape[1]):
@@ -78,11 +92,15 @@ def test_single_case(model, testloader, output_dir):
     pred_slice = prediction_np[slice_idx]
     label_slice = label_np[slice_idx]
 
-    # Show class distribution
+    # -------------------------------
+    # 🔹 Show class distribution
+    # -------------------------------
     unique, counts = np.unique(prediction_np, return_counts=True)
     print(f"Predicted classes for {case_name}: {dict(zip(unique, counts))}")
 
-    # Plot modalities, ground truth, and prediction
+    # -------------------------------
+    # 🔹 Plot MRI + masks
+    # -------------------------------
     plt.figure(figsize=(18, 6))
     
     for i, (mod_name, img_slice) in enumerate(zip(modality_names, img_slices)):
@@ -91,19 +109,19 @@ def test_single_case(model, testloader, output_dir):
         plt.title(mod_name)
         plt.axis("off")
 
-    # Ground Truth (segmentation mask)
+    # Ground Truth mask
     plt.subplot(2, 4, 5)
     plt.imshow(label_slice, cmap="tab10", vmin=0, vmax=3)
     plt.title("Ground Truth")
     plt.axis("off")
 
-    # Prediction (segmentation mask)
+    # Prediction mask
     plt.subplot(2, 4, 6)
     plt.imshow(pred_slice, cmap="tab10", vmin=0, vmax=3)
     plt.title("Prediction")
     plt.axis("off")
 
-    # Optional overlay visualization
+    # Overlay (Prediction + FLAIR)
     plt.subplot(2, 4, 7)
     plt.imshow(img_slices[3], cmap="gray")
     plt.imshow(pred_slice, cmap="tab10", alpha=0.5, vmin=0, vmax=3)
@@ -118,7 +136,9 @@ def test_single_case(model, testloader, output_dir):
     plt.savefig(out_file, dpi=150)
     print(f"🖼 Saved visualization to {out_file}")
 
-    # Accuracy (simple pixel-wise)
+    # -------------------------------
+    # 🔹 Pixel accuracy
+    # -------------------------------
     acc = pixel_accuracy(prediction_np, label_np)
     print(f"✅ Single-case Accuracy for {case_name}: {acc:.4f}")
 
