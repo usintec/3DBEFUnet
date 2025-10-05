@@ -41,12 +41,13 @@ def pixel_accuracy(pred, label):
 # 🔹 Visualize single test case
 # -------------------------------
 @torch.no_grad()
+@torch.no_grad()
 def test_single_case(model, testloader, output_dir):
     model.eval()
 
-    # Pick a random index
+    # Pick a random case from the test dataset
     idx = random.randint(0, len(testloader.dataset) - 1)
-    batch = testloader.dataset[idx]  # dataset returns dict
+    batch = testloader.dataset[idx]
     image = batch["image"].unsqueeze(0).to(DEVICE)   # (1, 4, D, H, W)
     label = batch["label"].unsqueeze(0).to(DEVICE)   # (1, D, H, W)
     case_name = batch["case_name"]
@@ -59,38 +60,57 @@ def test_single_case(model, testloader, output_dir):
     prediction_np = pred.squeeze(0).cpu().numpy()
     label_np = label.squeeze(0).cpu().numpy()
 
-    # Random slice instead of fixed middle
-    slice_idx = random.randint(0, prediction_np.shape[0] - 1)
-    
-    # Extract all 4 modalities
+    # Choose a slice that contains tumor (fallback to center if none)
+    tumor_slices = np.where(label_np.sum(axis=(1, 2)) > 0)[0]
+    if len(tumor_slices) > 0:
+        slice_idx = random.choice(tumor_slices.tolist())
+    else:
+        slice_idx = prediction_np.shape[0] // 2
+
+    # Extract all 4 modalities and normalize to [0, 1]
     modality_names = ["T1", "T1ce", "T2", "FLAIR"]
-    img_slices = [image[0, m, slice_idx].cpu().numpy() for m in range(image.shape[1])]
-    
+    img_slices = []
+    for m in range(image.shape[1]):
+        img_slice = image[0, m, slice_idx].cpu().numpy()
+        img_slice = (img_slice - img_slice.min()) / (img_slice.max() - img_slice.min() + 1e-8)
+        img_slices.append(img_slice)
+
     pred_slice = prediction_np[slice_idx]
     label_slice = label_np[slice_idx]
 
-    # Plot 4 modalities + GT + Prediction
+    # Show class distribution
+    unique, counts = np.unique(prediction_np, return_counts=True)
+    print(f"Predicted classes for {case_name}: {dict(zip(unique, counts))}")
+
+    # Plot modalities, ground truth, and prediction
     plt.figure(figsize=(18, 6))
     
     for i, (mod_name, img_slice) in enumerate(zip(modality_names, img_slices)):
-        plt.subplot(2, 3, i+1)
+        plt.subplot(2, 4, i + 1)
         plt.imshow(img_slice, cmap="gray")
         plt.title(mod_name)
         plt.axis("off")
 
-    # Ground Truth
-    plt.subplot(2, 3, 5)
-    plt.imshow(label_slice, cmap="viridis")
+    # Ground Truth (segmentation mask)
+    plt.subplot(2, 4, 5)
+    plt.imshow(label_slice, cmap="tab10", vmin=0, vmax=3)
     plt.title("Ground Truth")
     plt.axis("off")
 
-    # Prediction
-    plt.subplot(2, 3, 6)
-    plt.imshow(pred_slice, cmap="viridis")
+    # Prediction (segmentation mask)
+    plt.subplot(2, 4, 6)
+    plt.imshow(pred_slice, cmap="tab10", vmin=0, vmax=3)
     plt.title("Prediction")
     plt.axis("off")
 
-    plt.suptitle(f"Case: {case_name}, Slice {slice_idx}")
+    # Optional overlay visualization
+    plt.subplot(2, 4, 7)
+    plt.imshow(img_slices[3], cmap="gray")
+    plt.imshow(pred_slice, cmap="tab10", alpha=0.5, vmin=0, vmax=3)
+    plt.title("Overlay (FLAIR + Prediction)")
+    plt.axis("off")
+
+    plt.suptitle(f"Case: {case_name}, Slice: {slice_idx}")
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
@@ -98,9 +118,10 @@ def test_single_case(model, testloader, output_dir):
     plt.savefig(out_file, dpi=150)
     print(f"🖼 Saved visualization to {out_file}")
 
-    # Accuracy
+    # Accuracy (simple pixel-wise)
     acc = pixel_accuracy(prediction_np, label_np)
     print(f"✅ Single-case Accuracy for {case_name}: {acc:.4f}")
+
     return acc
 
 # -------------------------------
