@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import argparse
 import random
+import time
 
 import configs.BEFUnet_Config as configs
 from models.BEFUnet import BEFUnet3D
@@ -18,8 +19,7 @@ MODEL_PATH = "/content/drive/MyDrive/outputs/BEFUnet3D/BEFUnet3D_best.pth"
 parser = argparse.ArgumentParser()
 parser.add_argument('--output_dir', type=str,
                     default='/content/drive/MyDrive/outputs/BEFUnet3D', help='root dir for output log')
-parser.add_argument('--model_name', type=str,
-                    default='BEFUnet3D')
+parser.add_argument('--model_name', type=str, default='BEFUnet3D')
 parser.add_argument('--root_path', type=str,
                     default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
                     help='root dir for training data')
@@ -45,7 +45,11 @@ def pixel_accuracy(pred, label):
 def test_single_case(model, testloader, output_dir):
     model.eval()
 
-    # Keep looping until a case with tumor is found
+    # ✅ Ensure a different random seed each run
+    random.seed(time.time())
+    np.random.seed(int(time.time()) % 2**32)
+    torch.manual_seed(int(time.time()) % 2**32)
+
     valid_case_found = False
     attempt = 0
 
@@ -54,10 +58,10 @@ def test_single_case(model, testloader, output_dir):
         batch = testloader.dataset[idx]
         label = batch["label"]
 
-        # ✅ Check if tumor exists (non-background labels > 0)
+        # ✅ Check if tumor exists
         if torch.any(label > 0):
             valid_case_found = True
-            print(f"✅ Selected tumor case: {batch['case_name']}")
+            print(f"✅ Selected random tumor case: {batch['case_name']} (index: {idx})")
         else:
             attempt += 1
             continue
@@ -66,21 +70,19 @@ def test_single_case(model, testloader, output_dir):
         print("⚠️ No tumor case found in the dataset.")
         return None
 
-    # Extract image/label for selected case
-    image = batch["image"].unsqueeze(0).to(DEVICE)   # (1, 4, D, H, W)
-    label = batch["label"].unsqueeze(0).to(DEVICE)   # (1, D, H, W)
+    # -------------------------------
+    # 🔹 Extract and infer
+    # -------------------------------
+    image = batch["image"].unsqueeze(0).to(DEVICE)
+    label = batch["label"].unsqueeze(0).to(DEVICE)
     case_name = batch["case_name"]
 
-    # -------------------------------
-    # 🔹 Inference
-    # -------------------------------
     seg_logits, _, _ = model(image)
     pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)
 
     prediction_np = pred.squeeze(0).cpu().numpy()
     label_np = label.squeeze(0).cpu().numpy()
 
-    # Select slice with tumor (label > 0)
     tumor_slices = np.where(label_np.sum(axis=(1, 2)) > 0)[0]
     if len(tumor_slices) == 0:
         print(f"⚠️ No visible tumor slice in {case_name}. Skipping visualization.")
@@ -130,17 +132,12 @@ def test_single_case(model, testloader, output_dir):
 # 🔹 Main
 # -------------------------------
 if __name__ == "__main__":
-    CONFIGS = {
-        'BEFUnet3D': configs.get_BEFUnet_configs(),
-    }
+    CONFIGS = {'BEFUnet3D': configs.get_BEFUnet_configs()}
     _, test_loader = get_train_val_loaders(args.root_path, batch_size=1)
 
-    model = BEFUnet3D(
-        config=CONFIGS['BEFUnet3D'],
-        n_classes=4).to(DEVICE)
+    model = BEFUnet3D(config=CONFIGS['BEFUnet3D'], n_classes=4).to(DEVICE)
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     model.load_state_dict(checkpoint["model_state"])
     print("✅ Loaded trained model.")
 
-    # Run single-case test (only tumor case)
     test_single_case(model, test_loader, args.output_dir)

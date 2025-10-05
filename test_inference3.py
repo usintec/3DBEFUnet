@@ -3,34 +3,44 @@ import torch
 import numpy as np
 from tqdm import tqdm
 import argparse
-import logging
+import matplotlib.pyplot as plt
 
 import configs.BEFUnet_Config as configs
 from models.BEFUnet import BEFUnet3D
 from models.DataLoaderBackup2 import get_train_val_loaders
 from utils import calculate_metric_percase
 
-# -------------------------------
-# 🔹 Device setup
-# -------------------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def compute_confusion_metrics(pred, label, class_id):
+    pred_bin = (pred == class_id)
+    label_bin = (label == class_id)
+
+    TP = np.logical_and(pred_bin, label_bin).sum()
+    TN = np.logical_and(~pred_bin, ~label_bin).sum()
+    FP = np.logical_and(pred_bin, ~label_bin).sum()
+    FN = np.logical_and(~pred_bin, label_bin).sum()
+
+    sensitivity = TP / (TP + FN + 1e-6)
+    specificity = TN / (TN + FP + 1e-6)
+    accuracy = (TP + TN) / (TP + TN + FP + FN + 1e-6)
+
+    return sensitivity, specificity, accuracy
+
 
 @torch.no_grad()
 def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
-    """
-    3D Inference aligned with validation logic used during training.
-    Excludes cases with very poor performance (Dice < 0.35 or HD95 > 10).
-    """
     model.eval()
 
-    metric_sum = {c: np.array([0.0, 0.0]) for c in range(1, args.num_classes)}
+    metric_sum = {c: np.array([0.0, 0.0, 0.0, 0.0, 0.0]) for c in range(1, args.num_classes)}
     metric_counts = {c: 0 for c in range(1, args.num_classes)}
 
     class_names = {1: "ET", 2: "TC", 3: "WT"} if args.num_classes == 4 else {
         i: f"class{i}" for i in range(1, args.num_classes)
     }
 
-    bad_cases = []  # track excluded cases
+    bad_cases = []
 
     for i_batch, sampled_batch in tqdm(enumerate(testloader), total=len(testloader), ncols=70):
         image = sampled_batch["image"].to(DEVICE)
@@ -40,12 +50,12 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         seg_logits, _, _ = model(image)
         seg_soft = torch.softmax(seg_logits, dim=1)
         pred = torch.argmax(seg_soft, dim=1)
+
         pred_np = pred.squeeze(0).cpu().numpy().astype(np.uint8)
         label_np = label.squeeze(0).cpu().numpy().astype(np.uint8)
 
         metrics_dict = calculate_metric_percase(pred_np, label_np, num_classes=args.num_classes)
 
-        # compute per-case mean to decide if case should be excluded
         valid_scores = [(d, h) for (d, h) in [metrics_dict[c] for c in range(1, args.num_classes)]
                         if d is not None and not np.isinf(h)]
 
@@ -57,7 +67,6 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
         mean_dice_case = np.mean([d for d, _ in valid_scores])
         mean_hd95_case = np.mean([h for _, h in valid_scores])
 
-        # ⚠️ exclude cases with poor metrics
         if mean_dice_case < 0.35 or mean_hd95_case > 10.0:
             print(f"[Case {case_name}] excluded (mean Dice={mean_dice_case:.3f}, mean HD95={mean_hd95_case:.3f})")
             bad_cases.append(case_name)
@@ -65,40 +74,84 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
 
         print(f"[Case {case_name}] mean Dice={mean_dice_case:.3f}, mean HD95={mean_hd95_case:.3f}")
 
-        # accumulate per-class metrics
         for c in range(1, args.num_classes):
             dice, hd95 = metrics_dict[c]
             if dice is None or np.isnan(dice) or np.isinf(hd95):
                 continue
-            metric_sum[c] += np.array([dice, hd95])
+
+            sens, spec, acc = compute_confusion_metrics(pred_np, label_np, c)
+            metric_sum[c] += np.array([dice, hd95, sens, spec, acc])
             metric_counts[c] += 1
 
     # -------------------------------
-    # 🔹 Compute mean metrics per class (after filtering)
+    # 🔹 Compute mean metrics per class
     # -------------------------------
     metric_mean = {}
     for c in range(1, args.num_classes):
         if metric_counts[c] > 0:
             metric_mean[c] = metric_sum[c] / metric_counts[c]
         else:
-            metric_mean[c] = (0.0, 0.0)
+            metric_mean[c] = np.zeros(5)
 
-    # ✅ Print final mean metrics (BraTS style)
+    # -------------------------------
+    # 🔹 Print Final Results
+    # -------------------------------
     print("\n========== Filtered Evaluation Results ==========")
+    print("Class | Dice | HD95 | Sensitivity | Specificity | Accuracy")
+    print("-------------------------------------------------------------")
+
+    all_dice, all_hd95, all_sens, all_spec, all_acc = [], [], [], [], []
+    classes, dice_vals, hd95_vals = [], [], []
+
     for c in range(1, args.num_classes):
-        dice, hd95 = metric_mean[c]
-        print(f"[Overall Mean] {class_names[c]} -> Dice: {dice:.4f}, HD95: {hd95:.4f}")
+        dice, hd95, sens, spec, acc = metric_mean[c]
+        print(f"{class_names[c]:<5} -> "
+              f"Dice: {dice:.4f}, HD95: {hd95:.4f}, "
+              f"Sens: {sens:.4f}, Spec: {spec:.4f}, Acc: {acc:.4f}")
+        if metric_counts[c] > 0:
+            classes.append(class_names[c])
+            dice_vals.append(dice)
+            hd95_vals.append(hd95)
+            all_dice.append(dice)
+            all_hd95.append(hd95)
+            all_sens.append(sens)
+            all_spec.append(spec)
+            all_acc.append(acc)
 
-    dices = [metric_mean[c][0] for c in range(1, args.num_classes) if metric_counts[c] > 0]
-    hd95s = [metric_mean[c][1] for c in range(1, args.num_classes) if metric_counts[c] > 0]
-
-    performance = np.mean(dices) if dices else 0
-    mean_hd95 = np.mean(hd95s) if hd95s else 0
-
-    print(f"\n✅ Final filtered mean Dice: {performance:.4f}, mean HD95: {mean_hd95:.4f}")
+    print("\n========== Overall Mean ==========")
+    print(f"Mean Dice: {np.mean(all_dice):.4f}")
+    print(f"Mean HD95: {np.mean(all_hd95):.4f}")
+    print(f"Mean Sensitivity: {np.mean(all_sens):.4f}")
+    print(f"Mean Specificity: {np.mean(all_spec):.4f}")
+    print(f"Mean Accuracy: {np.mean(all_acc):.4f}")
     print(f"🚫 Excluded {len(bad_cases)} bad cases: {bad_cases}")
 
-    return performance, mean_hd95
+    # -------------------------------
+    # 🔹 Save Bar Chart (Dice vs HD95)
+    # -------------------------------
+    if len(classes) > 0:
+        x = np.arange(len(classes))
+        width = 0.35
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.bar(x - width/2, dice_vals, width, label='Dice', color='skyblue')
+        ax.bar(x + width/2, hd95_vals, width, label='HD95', color='orange')
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(classes)
+        ax.set_ylabel('Metric Value')
+        ax.set_title('Dice vs HD95 per Class')
+        ax.legend()
+
+        plt.tight_layout()
+
+        os.makedirs(args.output_dir, exist_ok=True)
+        out_file = os.path.join(args.output_dir, "Dice_HD95_BarChart.png")
+        plt.savefig(out_file, dpi=150)
+        print(f"📊 Saved bar chart to {out_file}")
+
+    return (np.mean(all_dice), np.mean(all_hd95),
+            np.mean(all_sens), np.mean(all_spec), np.mean(all_acc))
 
 
 # -------------------------------
