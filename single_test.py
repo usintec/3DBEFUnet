@@ -103,6 +103,60 @@ def test_single_case(model, testloader, output_dir):
     print(f"✅ Single-case Accuracy for {case_name}: {acc:.4f}")
     return acc
 
+def test_single_case1(model, testloader, output_dir):
+    model.eval()
+
+    # Pick a random index
+    idx = random.randint(0, len(testloader.dataset) - 1)
+    batch = testloader.dataset[idx]  # dataset returns dict
+    image = batch["image"].unsqueeze(0).to(DEVICE)   # add batch dim → (1, C, D, H, W)
+    label = batch["label"].unsqueeze(0).to(DEVICE)   # (1, D, H, W)
+    case_name = batch["case_name"]
+
+    # Run inference
+    seg_logits, _, _ = model(image)
+    pred = torch.argmax(torch.softmax(seg_logits, dim=1), dim=1)  # (1, D, H, W)
+
+    # Convert to numpy
+    prediction_np = pred.squeeze(0).cpu().numpy()
+    label_np = label.squeeze(0).cpu().numpy()
+
+    # Random slice instead of fixed middle
+    slice_idx = random.randint(0, prediction_np.shape[0] - 1)
+    img_slice = image[0, 0, slice_idx].cpu().numpy()
+    pred_slice = prediction_np[slice_idx]
+    label_slice = label_np[slice_idx]
+
+    # Plot input, GT, prediction
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 3, 1)
+    plt.imshow(img_slice, cmap="gray")
+    plt.title("Input Image")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 2)
+    plt.imshow(label_slice, cmap="viridis")
+    plt.title("Ground Truth")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 3)
+    plt.imshow(pred_slice, cmap="viridis")
+    plt.title("Prediction")
+    plt.axis("off")
+
+    plt.suptitle(f"Case: {case_name}, Slice {slice_idx}")
+    plt.tight_layout()
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_file = os.path.join(output_dir, f"{case_name}_slice{slice_idx}_result.png")
+    plt.savefig(out_file, dpi=150)
+    print(f"🖼 Saved visualization to {out_file}")
+
+    # Accuracy
+    acc = pixel_accuracy(prediction_np, label_np)
+    print(f"✅ Single-case Accuracy for {case_name}: {acc:.4f}")
+    return acc
+
 # -------------------------------
 # 🔹 Main
 # -------------------------------
@@ -122,5 +176,5 @@ if __name__ == "__main__":
     print("✅ Loaded trained model.")
 
     # Run single-case test
-    test_single_case(model, test_loader, args.output_dir)
+    test_single_case1(model, test_loader, args.output_dir)
 
