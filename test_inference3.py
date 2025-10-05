@@ -127,28 +127,31 @@ def inference_3d(model, testloader, args, test_save_path=None, visualize=False):
     print(f"🚫 Excluded {len(bad_cases)} bad cases: {bad_cases}")
 
     # -------------------------------
-    # 🔹 Save Bar Chart (Dice vs HD95)
+    # 🔹 Separate Bar Charts
     # -------------------------------
     if len(classes) > 0:
-        x = np.arange(len(classes))
-        width = 0.35
-
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.bar(x - width/2, dice_vals, width, label='Dice', color='skyblue')
-        ax.bar(x + width/2, hd95_vals, width, label='HD95', color='orange')
-
-        ax.set_xticks(x)
-        ax.set_xticklabels(classes)
-        ax.set_ylabel('Metric Value')
-        ax.set_title('Dice vs HD95 per Class')
-        ax.legend()
-
-        plt.tight_layout()
-
         os.makedirs(args.output_dir, exist_ok=True)
-        out_file = os.path.join(args.output_dir, "Dice_HD95_BarChart.png")
-        plt.savefig(out_file, dpi=150)
-        print(f"📊 Saved bar chart to {out_file}")
+
+        # Dice Chart
+        plt.figure(figsize=(6, 5))
+        plt.bar(classes, dice_vals, color='skyblue')
+        plt.title('Dice Score per Class')
+        plt.ylabel('Dice')
+        plt.ylim(0, 1)
+        plt.tight_layout()
+        out_file_dice = os.path.join(args.output_dir, "Dice_BarChart.png")
+        plt.savefig(out_file_dice, dpi=150)
+        print(f"📊 Saved Dice bar chart to {out_file_dice}")
+
+        # HD95 Chart
+        plt.figure(figsize=(6, 5))
+        plt.bar(classes, hd95_vals, color='orange')
+        plt.title('HD95 per Class')
+        plt.ylabel('HD95')
+        plt.tight_layout()
+        out_file_hd95 = os.path.join(args.output_dir, "HD95_BarChart.png")
+        plt.savefig(out_file_hd95, dpi=150)
+        print(f"📊 Saved HD95 bar chart to {out_file_hd95}")
 
     return (np.mean(all_dice), np.mean(all_hd95),
             np.mean(all_sens), np.mean(all_spec), np.mean(all_acc))
