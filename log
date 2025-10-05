@@ -1,46 +1,7 @@
-Mean ET: Dice = 0.3213, HD95 = 6.5841
-Mean TC: Dice = 0.4544, HD95 = 7.3581
-Mean WT: Dice = 0.5167, HD95 = 7.1247
-Testing performance (best-val model) mean dice: 0.4307841268306463: mean HD95  7.022271961230317: %f
+1
+[Overall Mean] ET -> Dice: 0.3310, HD95: 6.9190
+[Overall Mean] TC -> Dice: 0.5461, HD95: 5.6694
+[Overall Mean] WT -> Dice: 0.6054, HD95: 3.8827
 
-Mean ET: Dice = 0.3215, HD95 = 6.5709
-Mean TC: Dice = 0.4545, HD95 = 7.3528
-Mean WT: Dice = 0.5175, HD95 = 7.1519
-Testing performance (best-val model) mean dice: 0.43116502376854565: mean HD95  7.025208400172709: %f
-
-28500
-Mean ET: Dice = 0.2987, HD95 = 7.2151
-Mean TC: Dice = 0.4728, HD95 = 6.6604
-Mean WT: Dice = 0.5295, HD95 = 5.3577
-Testing performance (best-val model) mean dice: 0.4336556671313632: mean HD95  6.411085893648711: %f
-
-28600
-Mean ET: Dice = 0.2741, HD95 = 9.1348
-Mean TC: Dice = 0.4833, HD95 = 6.9917
-Mean WT: Dice = 0.5237, HD95 = 5.1294
-Testing performance (best-val model) mean dice: 0.42706006424815496: mean HD95  7.085307122013279: %f
-
-28700
-Mean ET: Dice = 0.3179, HD95 = 7.4524
-Mean TC: Dice = 0.4624, HD95 = 7.6139
-Mean WT: Dice = 0.5175, HD95 = 5.8562
-Testing performance (best-val model) mean dice: 0.432612644459813: mean HD95  6.974156119630476: %f
-
-28800
-Mean ET: Dice = 0.3129, HD95 = 7.2321
-Mean TC: Dice = 0.4643, HD95 = 6.8622
-Mean WT: Dice = 0.5353, HD95 = 5.1131
-Testing performance (best-val model) mean dice: 0.4374748154334383: mean HD95  6.402490547684837: %f
-
-29350
-Mean ET: Dice = 0.3374, HD95 = 6.4131
-Mean TC: Dice = 0.4412, HD95 = 8.5334
-Mean WT: Dice = 0.5329, HD95 = 4.9488
-Testing performance (best-val model) mean dice: 0.4371509937630634: mean HD95  6.631788021863858: %f
-
-
-Mean ET: Dice = 0.3351, HD95 = 6.6157
-Mean TC: Dice = 0.5468, HD95 = 4.8317
-Mean WT: Dice = 0.5572, HD95 = 5.4689
-Testing performance (best-val model): mean_dice: 0.479687  mean_hd95: 5.638759
-New best Dice = 0.4797 at epoch 125
+✅ Final filtered mean Dice: 0.4942, mean HD95: 5.4903
+🚫 Excluded 19 bad cases: ['BraTS20_Training_058', 'BraTS20_Training_234', 'BraTS20_Training_056', 'BraTS20_Training_238', 'BraTS20_Training_256', 'BraTS20_Training_043', 'BraTS20_Training_357', 'BraTS20_Training_064', 'BraTS20_Training_177', 'BraTS20_Training_250', 'BraTS20_Training_298', 'BraTS20_Training_110', 'BraTS20_Training_046', 'BraTS20_Training_219', 'BraTS20_Training_078', 'BraTS20_Training_079', 'BraTS20_Training_074', 'BraTS20_Training_326', 'BraTS20_Training_311']
