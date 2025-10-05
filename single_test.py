@@ -176,5 +176,5 @@ if __name__ == "__main__":
     print("✅ Loaded trained model.")
 
     # Run single-case test
-    test_single_case1(model, test_loader, args.output_dir)
+    test_single_case(model, test_loader, args.output_dir)
 
