@@ -4,7 +4,17 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 from collections import Counter
 from sklearn.model_selection import train_test_split
-from models.DataLoader import get_all_cases
+
+# ================================
+# Collect all case directories
+# ================================
+def get_all_cases(data_dir):
+    """Return all BraTS case directories"""
+    cases = sorted(glob.glob(os.path.join(data_dir, "BraTS20_Training_*")))
+    if not cases:
+        raise FileNotFoundError(f"No BraTS cases found in {data_dir}")
+    print(f"✅ Found {len(cases)} cases in {data_dir}")
+    return cases
 
 
 # ================================
@@ -16,8 +26,12 @@ def analyze_dataset(cases, name="Dataset", output_dir="./outputs"):
     tumor_fractions = []
 
     for case in cases:
-        seg_file = glob.glob(os.path.join(case, "*seg.nii*"))[0]
-        seg = nib.load(seg_file).get_fdata().astype(np.int32)
+        seg_file = glob.glob(os.path.join(case, "*seg.nii*"))
+        if not seg_file:
+            print(f"⚠️ Skipping {case} (no segmentation file found)")
+            continue
+
+        seg = nib.load(seg_file[0]).get_fdata().astype(np.int32)
 
         # Remap BraTS labels (4 -> 3 = Enhancing Tumor)
         seg[seg == 4] = 3
@@ -29,7 +43,6 @@ def analyze_dataset(cases, name="Dataset", output_dir="./outputs"):
         voxel_counts['total'] += seg.size
         voxel_counts['tumor'] += np.sum(seg > 0)
         voxel_counts['background'] += np.sum(seg == 0)
-
         tumor_fractions.append(np.mean(seg > 0))
 
     # ================================
@@ -39,7 +52,7 @@ def analyze_dataset(cases, name="Dataset", output_dir="./outputs"):
     print(f"📂 Cases: {len(cases)}")
 
     for c, count in sorted(class_counts.items()):
-        label = {0:"Background",1:"Necrotic/Non-enhancing",2:"Edema",3:"Enhancing Tumor"}[c]
+        label = {0:"Background",1:"Necrotic/Non-enhancing",2:"Edema",3:"Enhancing Tumor"}.get(c, f"Class {c}")
         print(f"  {label:25s}: {count:,} voxels ({count/voxel_counts['total']*100:.3f}%)")
 
     print(f"\n   Total voxels: {voxel_counts['total']:,}")
@@ -53,15 +66,15 @@ def analyze_dataset(cases, name="Dataset", output_dir="./outputs"):
     # ================================
     # Plot Histogram and Save
     # ================================
-    plt.figure(figsize=(6,4))
+    plt.figure(figsize=(6, 4))
     plt.hist(tumor_fractions, bins=30, color="steelblue", edgecolor="black")
     plt.title(f"Tumor voxel fraction per case ({name})")
     plt.xlabel("Tumor fraction")
     plt.ylabel("Number of cases")
     plt.tight_layout()
 
-    # Save figure
-    out_file = os.path.join(output_dir, f"{name.replace(' ','_')}_tumor_fraction.png")
+    os.makedirs(output_dir, exist_ok=True)
+    out_file = os.path.join(output_dir, f"{name.replace(' ', '_')}_tumor_fraction.png")
     plt.savefig(out_file, dpi=150)
     plt.close()
     print(f"📁 Saved chart to: {out_file}")
@@ -72,20 +85,26 @@ def analyze_dataset(cases, name="Dataset", output_dir="./outputs"):
 # ================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str,
-                        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
-                        help='path to BraTS data root')
-    parser.add_argument('--output_dir', type=str,
-                        default='/content/drive/MyDrive/outputs/RawDataset',
-                        help='directory for saving analytics charts')
+    parser.add_argument(
+        '--data_dir',
+        type=str,
+        default='/content/brats2020/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData',
+        help='Path to BraTS data root'
+    )
+    parser.add_argument(
+        '--output_dir',
+        type=str,
+        default='/content/drive/MyDrive/outputs/RawDataset',
+        help='Directory for saving analytics charts'
+    )
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # All cases
+    # Load all cases using the new logic
     all_cases = get_all_cases(args.data_dir)
 
-    # Train/Val split
+    # Optionally split into train/validation
     # train_cases, val_cases = train_test_split(all_cases, test_size=0.2, random_state=42)
 
     # Run analytics
