@@ -89,9 +89,9 @@ def augment(modalities, seg):
         modalities = modalities + shift
 
     # Gamma adjustment (safe for negative or zero values)
-if random.random() > 0.5:
-    gamma = np.random.uniform(0.8, 1.2)
-    modalities = np.clip(modalities, 0, None) ** gamma
+    if random.random() > 0.5:
+        gamma = np.random.uniform(0.8, 1.2)
+        modalities = np.clip(modalities, 0, None) ** gamma
 
 
     # Gaussian noise
